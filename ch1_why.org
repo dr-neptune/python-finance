@@ -1,6 +1,9 @@
 #+TITLE: Chapter 1: Why Python for Finance
 
 
+from numpy import arange
+
+
 Initial stock index level: $s_0 = 100$
 Strike price of the European call option $K = 105$
 Time to maturity $T = 1$ year
@@ -43,5 +46,137 @@ hT = np.maximum(ST - K, 0)
 C0 = math.exp(-r * T) * np.mean(hT)
 
 print(f"The value of the European Call option:\t{C0:5.3f}")
-
 #+end_src
+
+* Shorter to Time Results
+
+Consider a finance student who wishes to:
+- retrieve index level data from the web
+- calculate the annualized rolling standard deviation of the log returns (volatility)
+- plot the index level data and volatility results
+
+It would be quick with python
+
+#+begin_src python :tangle ch1.py
+import numpy as np
+import pandas as pd
+from pylab import plt, mpl
+from pathlib import Path
+
+plt.style.use('seaborn')
+mpl.rcParams['font.family'] = 'serif'
+
+csv_path = Path('csv_here.csv')
+df = pd.read_csv(csv_path, index_col=0, parse_dates=True)
+
+df = (df['.SPX']
+      .dropna())
+
+# view the dataframe
+df.info()
+
+# get returns
+df['rets'] = np.log(df / df.shift(1))
+df['vola'] = df['rets'].rolling(252).std() * np.sqrt(252)
+df[['.SPX', 'vola']].plot(subplots=True, figsize=(10,6))
+#+end_src
+
+#+begin_src python
+# with base math | ~ 1 second
+import math
+import time
+
+loops = 2500000
+a = range(1, loops)
+def f(x):
+    return 3 * math.log(x) + math.cos(x) ** 2
+
+start = time.time()
+r = [f(x) for x in a]
+end = time.time()
+print('%s seconds' % (end - start))
+
+# with numpy | ~ 5 - 7 ms
+import numpy as np
+a = np.arange(1, loops)
+start = time.time()
+r = 3 * np.log(a) + np.cos(a) ** 2
+end = time.time()
+print('%s seconds' % (end - start))
+
+# with JIT compilation | ~ 4 - 7 ms
+import numexpr as ne
+ne.set_num_threads(1)
+f = '3 * log(a) + cos(a) ** 2'
+start = time.time()
+r = ne.evaluate(f)
+end = time.time()
+print('%s seconds' % (end - start))
+
+# with JIT compilation and parallelization | ~ 1 ms
+import numexpr as ne
+ne.set_num_threads(12)
+f = '3 * log(a) + cos(a) ** 2'
+start = time.time()
+r = ne.evaluate(f)
+end = time.time()
+print('%s seconds' % (end - start))
+#+end_src
+
+* Data-Driven Finance
+
+Retrieving large scale data is made easy if you have the right api key.
+
+#+begin_src python :tangle ch1.py
+import eikon as ek
+from bs4 import BeautifulSoup
+
+ek.set_app_key('too expensive: $3600 - $22000 / year')
+
+data = ek.get_timeseries('AAPL.O', fields='*',
+                         start_date='2018-10-18 16:00:00',
+                         end_date='2018-10-18 17:00:00',
+                         interval='tick')
+
+data.info()  # would return 35350 entries for the hour
+
+# eikon also provides news articles
+news = ek.get_news_headlines('R:AAPL.O Language:LEN',
+                             date_from='2018-05-01',
+                             date_to='2018-06-29',
+                             count=7)
+
+news
+
+story_html = ek.get_news_story(news.iloc[1, 2])
+
+story = BeautifulSoup(story_html, 'html5lib').get_text()
+
+print(story[83:958])
+#+end_src
+
+* AI-First Finance
+
+  #+begin_src python
+import numpy as np
+import pandas as pd
+from pathlib import Path
+
+# import and prep
+df_path = Path('your_csv')
+df = pd.read_csv(df_path, index_col=0, parse_dates=True)
+df = df['AAPL.O']
+df['returns'] = np.log(df / df.shift())
+df.dropna(inplace=True)
+
+lags = 6
+cols = []
+for lag in range(1, lags + 1):
+    col = f'lag_{lag}'
+    df[col] = np.sign(df['returns'].shift(lag))
+    cols.append(col)
+df.dropna(inplace=True)
+
+# fit a SVM
+
+  #+end_src
