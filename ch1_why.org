@@ -1,0 +1,47 @@
+#+TITLE: Chapter 1: Why Python for Finance
+
+
+Initial stock index level: $s_0 = 100$
+Strike price of the European call option $K = 105$
+Time to maturity $T = 1$ year
+Constant, riskless short rate $r = 0.05$
+Constant volatility $\sigma = 0.25$
+
+In the BSM model, the index level at maturity is a random variable given by below where $z$ is a standard normally distributed RV
+
+*Black Scholes Model*
+$S_T = S_0 \exp ((r - \frac{1}{2} \sigma^2)T + \sigma \sqrt{T}z)$
+
+The fellowing is an algorithmic description of the Monte Carlo valuation procedure:
+
+1. Draw $I$ pseudo-random numbers $z(i), i \in \{1, 2, ..., I\}$ from the standard normal distribution
+2. Calculate all resulting index levels at maturity $S_T(i)$ for given $z(i)$ and our Black-Scholes model equation above
+3. Calculate all inner values of the option at maturity as $h_T(i) = \max(S_T(i) - K, 0)$
+4. Estimate the option present value via the Monte Carlo estimator as given by the equation below (Monte Carlo estimator for European Option)
+
+*Monte Carlo Estiamtor for European Option*
+$C_0 \approx e^{-rT}\frac{1}{I}\sum_I h_T(i)$
+
+#+begin_src python
+import math
+import numpy as np
+
+S0 = 100
+K = 105
+T = 1.0
+r = 0.05
+sigma = 0.2
+
+I = 100000
+
+np.random.seed(1000)
+
+z = np.random.standard_normal(I)
+
+ST = S0 * np.exp((r - sigma ** 2 / 2) * T + sigma * math.sqrt(T) * z)
+hT = np.maximum(ST - K, 0)
+C0 = math.exp(-r * T) * np.mean(hT)
+
+print(f"The value of the European Call option:\t{C0:5.3f}")
+
+#+end_src
