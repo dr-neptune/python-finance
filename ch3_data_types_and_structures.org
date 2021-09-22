@@ -1,1 +1,23 @@
 #+TITLE: Chapter 3: Data Types and Structures
+
+Sometimes we need arbitrary precision for floating point numbers
+
+#+begin_src python
+import decimal
+from decimal import ROUND_HALF_EVEN, Context, Decimal
+
+print(decimal.getcontext())
+
+d = Decimal(1) / Decimal(11)
+
+# change the precision
+decimal.getcontext().prec = 4
+
+e = Decimal(1) / Decimal(11)
+
+decimal.getcontext().prec = 50
+
+f = Decimal(1) / Decimal(11)
+
+g = d + e + f
+#+end_src

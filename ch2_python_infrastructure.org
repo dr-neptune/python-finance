@@ -1,0 +1,75 @@
+#+TITLE: Chapter 2: Python Infrastructure
+
+* Building a Ubuntu and Python Docker Image
+
+  #+begin_src shell :tangle basic_build/pybuntu.sh
+    #!/bin/bash
+    #
+    # Script to install Ubuntu and basic Python components
+    #
+
+    # update package index cache and packages
+    apt-get update
+    apt-get upgrade -y
+
+    # install system tools
+    apt-get install -y bzip2 gcc git htop screen vim wget
+    apt-get upgrade -y bash
+    apt-get clean
+
+    # install conda
+    wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O Miniconda.sh
+    bash Miniconda.sh -b
+    rm -rf Miniconda.sh
+    export PATH="/root/miniconda3/bin:$PATH"
+
+    # install python libraries
+    conda update -y conda python
+  #+end_src
+
+The dockerfile uses the bash script to build a new docker image
+basic_build/
+#+begin_src dockerfile :tangle basic_build/Dockerfile
+  # Builds a Docker image with the latest Ubuntu version and a basic Python install
+
+      # latest Ubuntu
+      FROM ubuntu:latest
+
+      # information about maintainer
+      MAINTAINER yves
+
+      # add the bash script
+      ADD pybuntu.sh /
+
+      # change rights for the script
+      RUN chmod u+x /pybuntu.sh
+
+      # run the bash script
+      RUN /pybuntu.sh
+
+      # prepend the new path
+      ENV PATH /root/miniconda3/bin:$PATH
+
+      # execute IPython when container is run
+      CMD ["ipython"]
+#+end_src
+
+Place the Dockerfile and script inside of a directory.
+Then run
+
+#+begin_src shell
+
+  # go to directory
+  cd dir_name
+
+  # build the docker file with tag
+  docker build -t image_name:tag .
+
+  # check docker images
+  docker images
+
+  # run image
+  docker run
+#+end_src
+
+The rest of the chapter shows how to use a DigitalOcean instance to make a server with a jupyter notebook (with a password). It may be worth coming back to this later with the free 10 USD account.
