@@ -1,1 +1,240 @@
 #+TITLE: Chapter 5: Data Analysis with pandas
+
+* The DataFrame Class
+
+  #+begin_src python
+from operator import index
+import pandas as pd
+
+df = pd.DataFrame([10, 20, 30, 40],
+                  columns=['numbers'],
+                  index=['a', 'b', 'c', 'd'])
+
+# some methods
+print(df.index)
+print(df.columns)
+print(df.loc['c'])
+print(df.iloc[1:3])
+print(df.sum())
+print(df.apply(lambda x: x ** 2))
+print(df ** 2)
+
+# enlarging in both dimensions is possible
+df['floats'] = (1.5, 2.5, 3.5, 4.5)
+
+# a whole df can be taken to define a new column
+df['names'] = pd.DataFrame(['Yves', 'Sandra', 'Lilli', 'Henry'],
+                           index=['d', 'a', 'b', 'c'])
+
+# a side effect where the index gets replaced
+print(df.append({'numbers': 100, 'floats': 5.75, 'names': 'Jill'},
+            ignore_index=True))
+
+# instead we want to preserve indices
+df = df.append(pd.DataFrame({'numbers': 100, 'floats': 5.75, 'names': 'Jil'},
+                        index=['y']))
+
+
+df = df.append(pd.DataFrame({'names': 'Liz'},
+                        index=['z']))
+
+# majority of methods work even with missing values
+print(df[['numbers', 'floats']].mean())
+print(df[['numbers', 'floats']].std())
+  #+end_src
+
+* Second Steps with the DataFrame class
+
+  #+begin_src python
+import numpy as np
+np.random.seed(100)
+
+# creating dataframes from random variables
+a = np.random.standard_normal((9, 4))
+
+df = pd.DataFrame(a)
+
+df.columns = ['No1', 'No2', 'No3', 'No4']
+
+print(df['No2'].mean())
+
+# dealing with time indices
+dates = pd.date_range('2019-1-1', periods=9, freq='M')
+
+# add the dates as row names
+df.index = dates
+
+# get just values as a (np) array
+df.values
+np.array(df)
+  #+end_src
+
+* Basic Analytics
+
+  #+begin_src python
+# get information about data types and counts
+df.info()
+
+# get information about summary statistics
+df.describe()
+
+# get statistics of columns
+df.sum()
+df.mean()
+df.mean(axis=0)  # column-wise
+df.mean(axis=1)  # row-wise
+df.cumsum()
+
+# df objects also understand numpy universal functions
+np.mean(df)
+np.log(df)
+np.sqrt(abs(df))
+  #+end_src
+
+* Basic Visualization
+
+  #+begin_src python
+from pylab import plt, mpl
+import matplotlib
+matplotlib.use('TkAgg')
+plt.style.use('seaborn')
+mpl.rcParams['font.family'] = 'serif'
+
+df.cumsum().plot(lw=2.0, figsize=(10, 6))
+plt.show()
+
+
+df.plot.bar(figsize=(10,6), rot=15)
+plt.show()
+  #+end_src
+
+* The Series Class
+
+Series are single columns of data
+
+#+begin_src python
+type(df)
+
+S = pd.Series(np.linspace(0, 15, 7), name='series')
+
+S
+
+type(S)
+
+s = df['No1']
+
+s
+
+type(s)
+
+s.mean()
+
+s.plot(lw=2.0, figsize=(10,6))
+plt.show()
+#+end_src
+
+* GroupBy Operations
+
+  #+begin_src python
+df['Quarter'] = ['Q1', 'Q1', 'Q1', 'Q2', 'Q2', 'Q2', 'Q3', 'Q3', 'Q3']
+
+groups = df.groupby('Quarter')
+groups.size()
+groups.mean()
+groups.max()
+groups.aggregate([min, max]).round(2)
+
+# grouping with multiple columns
+df['Odd_Even'] = ['Odd', 'Even', 'Odd', 'Even', 'Odd', 'Even', 'Odd', 'Even', 'Odd']
+
+groups = df.groupby(['Quarter', 'Odd_Even'])
+groups.size()
+
+groups[['No1', 'No4']].aggregate([sum, np.mean])
+  #+end_src
+
+* Complex Selection
+
+Often, data selection is accomplished by formulation of conditions on column values, and potentially combining multiple such conditions logically.
+
+#+begin_src python
+data = np.random.standard_normal((10, 2))
+df = pd.DataFrame(data, columns=['x', 'y'])
+
+df.info()
+df.head()
+df.tail()
+
+# comparison operators
+df['x'] > 0.5
+(df['x'] > 0) & (df['y'] < 0)
+(df['x'] > 0) | (df['y'] < 0)
+
+# masking / filtering
+df[df['x'] > 0]
+df.query('x > 0')
+df[(df['x'] > 0) & (df['y'] < 0)]
+df.query('x > 0 & y < 0')
+
+# comparison operators can be applied to complete dataframe objects at once
+df > 0
+df[df > 0]
+#+end_src
+
+* Concatenation, Joining, and Merging
+
+  #+begin_src python
+df1 = pd.DataFrame(['100', '200', '300', '400'],
+                   index=['a', 'b', 'c', 'd'],
+                   columns=['A',])
+
+df1
+
+df2 = pd.DataFrame(['200', '150', '50'],
+                   index=['f', 'b', 'd'],
+                   columns=['B',])
+
+df2
+
+# concatenation
+df1.append(df2, sort=False)
+df1.append(df2, ignore_index=True, sort=False)
+pd.concat((df1, df2), sort=False)
+pd.concat((df1, df2), ignore_index=True, sort=False)
+
+# joining
+# left join
+df1.join(df2)
+df2.join(df1)
+
+df1.join(df2, how='left')
+df1.join(df2, how='right')
+df1.join(df2, how='inner')
+df1.join(df2, how='outer')
+
+# join sequentially
+df['A'] = df1['A']
+df['B'] = df2
+df
+
+# use a dictionary to combine the data sets simultaneously
+df = pd.DataFrame({'A': df1['A'],
+                   'B': df2['B']})
+  #+end_src
+
+* Merging
+
+A merge operation typically takes place on a column shared between the two data sets
+
+#+begin_src python
+c = pd.Series([250, 150, 50], index=['b', 'd', 'c'])
+df1['C'] = c
+df2['C'] = c
+df1
+df2
+
+#  by default, the merge takes place on a single shared column C. There is also an outer merge
+pd.merge(df1, df2)
+pd.merge(df1, df2, on='C')
+pd.merge(df1, df2, how='outer')
+#+end_src
