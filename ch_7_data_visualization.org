@@ -191,3 +191,116 @@ plt.show()
    #+end_src
 
 * Static 3D Plotting
+
+One application in which finance can benefit from visualization in 3D is in showing volatility surfaces. These show implied volatilities simultaneously for a number of times-to-maturity and strikes of the traded options used.
+
+Consider the parameters:
+- Strike values between 50 and 100
+- Times-to-Maturity between 0.5 and 2.5 years
+
+
+  #+begin_src python
+    import numpy as np
+    from mpl_toolkits.mplot3d import Axes3D
+
+    # generate a 2D coord system of data
+    strike = np.linspace(50, 150, 24)
+    ttm = np.linspace(0.5, 2.5, 24)
+    strike, ttm = np.meshgrid(strike, ttm)
+
+    strike[:2].round(1)
+
+    iv = (strike - 100) ** 2 / (100 * strike) / ttm
+    iv[:5, :3]
+
+    # plot it
+    fig = plt.figure(figsize=(10, 6))
+    ax = fig.gca(projection='3d')
+    surf = ax.plot_surface(strike, ttm, iv, rstride=2, cstride=2,
+                           cmap=plt.cm.coolwarm, linewidth=0.5,
+                           antialiased=True)
+    ax.set_xlabel('strike')
+    ax.set_ylabel('time to maturity')
+    ax.set_zlabel('implied volatility')
+    fig.colorbar(surf, shrink=0.5, aspect=5)
+    plt.show()
+
+    # replacing the style with points
+    fig = plt.figure(figsize=(10, 6))
+    ax = fig.add_subplot(111, projection='3d')
+    ax.view_init(30, 60)
+    ax.scatter(strike, ttm, iv, zdir='z', s=25, c='b', marker='^')
+    ax.set_xlabel('strike')
+    ax.set_ylabel('time to maturity')
+    ax.set_zlabel('implied volatility')
+    plt.show()
+
+  #+end_src
+
+* Interactive 2D Plotting
+
+  #+begin_src python
+    import pandas as pd
+    import cufflinks as cf
+    import plotly.offline as plyo
+
+    plyo.init_notebook_mode(connected=True)
+
+    # generate data
+    a = np.random.standard_normal((250, 5)).cumsum(axis=0)
+
+    index = pd.date_range('2019-1-1',
+                          freq='B',
+                          periods=len(a))
+
+    df = pd.DataFrame(100 + 5 * a,
+                      columns=list('abcde'),
+                      index=index)
+
+    df.head()
+
+    plyo.plot(df[['a', 'b']].iplot(asFigure=True,
+                       theme='polar',
+                       title='A Time Series Plot',
+                       xTitle='date',
+                       yTitle='value',
+                       mode={'a': 'markers', 'b': 'lines'},
+                       size=3.5,
+                       colors={'a': 'blue', 'b': 'magenta'}))
+
+    # other plot styles
+    plyo.plot(df.iplot(kind='hist',
+                       subplots=True,
+                       bins=15,
+                       asFigure=True))
+
+  #+end_src
+
+* Financial Plots
+
+The combination of plotly, cufflinks, and pandas proves useful when working with financial time series data.
+
+#+begin_src python
+  raw = pd.read_csv('data/fxcm_eur_usd_eod_data.csv',
+                    index_col=0, parse_dates=True)
+
+
+  quotes = raw[['OpenAsk', 'HighAsk', 'LowAsk', 'CloseAsk']]
+  quotes = quotes.iloc[-60:]
+  quotes.tail()
+
+  qf = cf.QuantFig(quotes,
+                   title='EUR/USD Exchange Rate',
+                   legend='top',
+                   name='EUR/USD')
+
+  # Add bollinger bands
+  qf.add_bollinger_bands(periods=15,
+                         boll_std=2)
+
+  # add RSI (Relative Strength Index) as a subplot
+  qf.add_rsi(periods=14,
+             showbands=False)
+
+  plyo.plot(qf.iplot(asFigure=True))
+#+end_src
