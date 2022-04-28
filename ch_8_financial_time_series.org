@@ -1,1 +1,191 @@
 #+TITLE: Chapter 8: Financial Time Series
+
+#+begin_src python
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('tkAgg')
+#+end_src
+
+* Data Import
+
+#+begin_src python
+df = pd.read_csv('data/tr_eikon_eod_data.csv',
+                 index_col=0,
+                 parse_dates=True)
+
+df.info()
+
+df.head()
+df.tail()
+
+
+df.plot(figsize=(10, 12), subplots=True)
+plt.show()
+
+
+# financial instruments that represent the single RICs (Reuters Instrument Codes)
+instruments = ['Apple Stock', 'Microsoft Stock',
+               'Intel Stock', 'Amazon Stock', 'Goldman Sachs Stock',
+               'SPDR S&P 500 ETF Trust', 'S&P 500 Index',
+               'VIX Volatility Index', 'EUR/USD Exchange Rate',
+               'Gold Price', 'VanEck Vectors Gold Miners ETF',
+               'SPDR Gold Trust']
+
+for ric, name in zip(df.columns, instruments):
+    print(f'{ric:8s} | {name}')
+#+end_src
+
+* Summary Statistics
+
+#+begin_src python
+df.info()
+df.describe().round(2)
+
+df.mean()
+
+df.aggregate([min, np.mean, np.std, np.median, max]).round(2)
+#+end_src
+
+* Changes Over Time
+
+#+begin_src python
+# absolute differences
+df.diff().head()
+df.diff().mean()
+
+# in stats we want to get back percentages since they aren't dependent on scale
+df.pct_change().round(3).head()
+df.pct_change().mean().plot(kind='bar', figsize=(10, 6))
+plt.show()
+
+# we can also use log returns
+rets = np.log(df / df.shift(1))
+rets.head().round(3)
+# show cumulative log returns for our single financial time series
+rets.cumsum().apply(np.exp).plot(figsize=(10, 6))
+plt.show()
+#+end_src
+
+* Resampling
+
+#+begin_src python
+df.resample('1w', label='right').last().head()  # resample to weekly intervals
+df.resample('1m', label='right').last().head()  # resample to monthly intervals
+rets.cumsum().apply(np.exp).resample('1m', label='right').last().plot(figsize=(10, 6))
+plt.show()
+#+end_src
+
+* Rolling Statistics
+
+#+begin_src python
+sym = 'AAPL.O'
+df = df[sym].to_frame().dropna()
+
+df.tail()
+
+# An Overview
+window = 20
+
+for stat in ['min', 'mean', 'std', 'median', 'max']:
+    df[stat] = getattr(df[sym].rolling(window=window), stat)()
+
+df['ewma'] = df[sym].ewm(halflife=0.5, min_periods=window).mean()
+
+# plot rolling stats
+ax = df[['min', 'mean', 'max']].iloc[-200:].plot(style=['g--', 'r--', 'g--'], lw=0.8)
+df[sym].iloc[-200:].plot(ax=ax, lw=2.0)
+plt.show()
+
+# A Technical Analysis Example
+# An old-school trading strategy
+# calc two simple moving averages
+# go long when the shorter-term SMA is > the longer-term SMA
+# go short when it is lower
+df['SMA1'] = df[sym].rolling(window=42).mean()
+df['SMA2'] = df[sym].rolling(window=252).mean()
+
+df[[sym, 'SMA1', 'SMA2']].tail()
+
+df[[sym, 'SMA1', 'SMA2']].plot()
+plt.show()
+
+df = df.dropna()
+df['positions'] = np.where(df['SMA1'] > df['SMA2'], 1, -1)  # if then else
+
+ax = df[[sym, 'SMA1', 'SMA2', 'positions']].plot(secondary_y='positions')
+ax.get_legend().set_bbox_to_anchor((0.25, 0.85))
+plt.show()
+#+end_src
+
+* Correlation Analysis
+
+#+begin_src python
+df = pd.read_csv('data/tr_eikon_eod_data.csv',
+                 index_col=0,
+                 parse_dates=True)
+
+df = df[['.SPX', '.VIX']].dropna()
+
+df.plot(subplots='True', figsize=(10, 6))
+plt.show()
+
+# plotting with adjusted scaling
+df.loc[:'2012-12-31'].plot(secondary_y='.VIX')
+plt.show()
+
+# Logarithmic Returns
+rets = np.log(df / df.shift(1)).dropna()
+rets.head()
+
+rets.plot(subplots=True)
+plt.show()
+
+# pandas scatter_matrix plots the log returns of the two series against each other
+pd.plotting.scatter_matrix(rets,
+                           alpha=0.2,
+                           diagonal='hist',
+                           hist_kwds={'bins': 35})
+plt.show()
+#+end_src
+
+* OLS Regression
+
+#+begin_src python
+reg = np.polyfit(rets['.SPX'], rets['.VIX'], deg=1)
+
+ax = rets.plot(kind='scatter', x='.SPX', y='.VIX')
+ax.plot(rets['.SPX'], np.polyval(reg, rets['.SPX']), 'r', lw=2)
+plt.show()
+#+end_src
+
+* Correlation
+
+#+begin_src python
+rets.corr()
+# get rolling correlation over time
+ax = rets['.SPX'].rolling(window=252).corr(rets['.VIX']).plot()
+# plot the correlation point estimate over the rolling corr plot
+ax.axhline(rets.corr().iloc[0, 1], c='r')
+plt.show()
+#+end_src
+
+* High-Frequency Data
+
+#+begin_src python
+df = pd.read_csv('data/fxcm_eur_usd_tick_data.csv',
+                 index_col=0, parse_dates=True)
+
+df.info()
+
+df['Mid'] = df.mean(axis=1)
+
+df['Mid'].plot()
+plt.show()
+
+tick_resam = df.resample(rule='5min', label='right').last()
+
+tick_resam['Mid'].plot()
+plt.show()
+#+end_src
