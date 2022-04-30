@@ -1,0 +1,460 @@
+#+TITLE: Chapter 10: Performance Python
+
+This chapter is about approaches to speed up typical tasks and algorithms often encountered in a financial context.
+
+This chapter introduces different approaches to speed up code:
+
+- vectorization
+- dynamic compiling
+- static compiling
+- multiprocessing
+
+With some topics:
+- loops
+- algorithms
+- binomial trees
+- monte carlo simulation
+- recursive pandas algorithm
+
+* Loops
+
+#+begin_src python
+import random
+import time
+
+def timeit(method):
+    def timed(*args, **kw):
+        ts = time.time()
+        result = method(*args, **kw)
+        te = time.time()
+        if 'log_time' in kw:
+            name = kw.get('log_name', method.__name__.upper())
+            kw['log_time'][name] = int((te - ts) * 1000)
+        else:
+            print('%r  %2.2f ms' % \
+                  (method.__name__, (te - ts) * 1000))
+        return result
+    return timed
+
+
+def timed_numba(fn, *args):
+    nb_fn = numba.jit(fn)
+    start_time = time.perf_counter()
+    nb_fn(*args)
+    end_time = time.perf_counter()
+    return end_time - start_time
+
+def average_py(n):
+    s = 0
+    for i in range(n):
+        s += random.random()
+    return s / n
+
+n = 1000000
+
+average_py(n)
+#+end_src
+
+* numpy
+
+#+begin_src python
+import numpy as np
+
+@timeit
+def average_np(n):
+    s = np.random.random(n)
+    return s.mean()
+
+average_np(n)
+
+# numba | dynamic compilation
+import numba
+
+average_nb = numba.jit(average_py)
+
+timed_numba(average_nb, n)
+
+start_time = time.perf_counter()
+average_nb(n)
+end_time = time.perf_counter()
+
+print(end_time - start_time)
+#+end_src
+
+* cython
+
+requires rewriting the code a bit
+
+Cython is an optimizing static compiler for Python
+It is a superset of the python language that additionally supports calling C functions and declaring C types on variables and class attributes.
+essentially you start with python and start tweaking it with C
+
+#+begin_src python
+from libc.stdlib cimport rand
+cdef extern from 'limits.h':
+    int INT_MAX
+cdef int i
+cdef float rn
+for i in range(5):
+    rn = rand() / INT_MAX
+    print(rn)
+#+end_src
+
+* Prime Numbers
+
+#+begin_src python
+def is_prime(I):
+    if I % 2 == 0:
+        return False
+    for i in range(3, int(I ** 0.5) + 1, 2):
+        if I % i == 0:
+            return False
+    return True
+
+n = int(1e8 + 3)
+
+is_prime(n)
+
+p1 = int(1e8 + 7)
+is_prime(p1)
+
+p2 = 100109100129162907
+is_prime(p2)
+
+# Numba
+# the loop structure in the function is_prime lends itself well to being dynamically compiled with Numba
+is_prime_nb = numba.jit(is_prime)
+
+timed_numba(is_prime, p2)
+
+# Multiprocessing
+import multiprocessing as mp
+
+pool = mp.Pool(processes=32)
+
+start_time = time.perf_counter()
+pool.map(is_prime, 10 * [p2])
+end_time = time.perf_counter()
+print(end_time - start_time)
+
+start_time = time.perf_counter()
+pool.map(is_prime_nb, 10 * [p2])
+end_time = time.perf_counter()
+print(end_time - start_time)
+#+end_src
+
+* Fibonacci Numbers
+
+#+begin_src python
+def fib_rec_py1(n):
+    if n < 2:
+        return n
+    else:
+        return fib_rec_py1(n - 1) + fib_rec_py1(n - 2)
+
+
+start_time = time.perf_counter()
+fib_rec_py1(35)
+end_time = time.perf_counter()
+print(end_time - start_time)
+
+
+fib_rec_nb = numba.jit(fib_rec_py1)
+
+start_time = time.perf_counter()
+fib_rec_nb(35)
+end_time = time.perf_counter()
+print(end_time - start_time)
+
+# caching
+from functools import lru_cache as cache
+
+@cache(maxsize=None)
+def fib_rec_py2(n):
+    if n < 2:
+        return n
+    else:
+        return fib_rec_py2(n - 1) + fib_rec_py2(n - 2)
+
+start_time = time.perf_counter()
+fib_rec_py2(80)
+end_time = time.perf_counter()
+print(end_time - start_time)
+#+end_src
+
+* The number pi
+
+#+begin_src python
+import random
+import numpy as np
+import matplotlib
+import matplotlib.pyplot as plt
+matplotlib.use('tkAgg')
+
+rn = np.array([(random.random() * 2 - 1, random.random() * 2 - 1)
+               for _ in range(500)])
+
+fig = plt.figure()
+ax = fig.add_subplot(1, 1, 1)
+circ = plt.Circle((0, 0), radius=1, edgecolor='g', lw=2.0, facecolor='None')
+box = plt.Rectangle((-1, -1), 2, 2, edgecolor='b', alpha=0.3)
+ax.add_patch(circ)
+ax.add_patch(box)
+plt.plot(rn[:, 0], rn[:, 1], 'r.')
+plt.ylim(-1.1, 1.1)
+plt.xlim(-1.1, 1.1)
+plt.show()
+
+# numpy version
+n = int(1e7)
+start_time = time.perf_counter()
+rn = np.random.random((n, 2)) * 2 - 1
+rn.nbytes
+distance = np.sqrt((rn ** 2).sum(axis=1))
+distance[:8].round(3)
+end_time = time.perf_counter()
+print(end_time - start_time)
+
+frac = (distance <= 1.0).sum() / len(distance)
+
+def mcs_pi_py(n):
+    circle = 0
+    for _ in range(n):
+        x, y = random.random(), random.random()
+        if (x ** 2 + y ** 2) ** 0.5 <= 1:
+            circle += 1
+    return (4 * circle) / n
+
+start_time = time.perf_counter()
+mcs_pi_py(n)
+end_time = time.perf_counter()
+print(end_time - start_time)
+
+mcs_pi_nb = numba.jit(mcs_pi_py)
+
+start_time = time.perf_counter()
+mcs_pi_nb(n)
+end_time = time.perf_counter()
+print(end_time - start_time)
+#+end_src
+
+* Binomial Trees
+
+A popular numerical method to value options is the binomial option pricing model pioneered by Cox, Ross, and Rubenstein.
+
+This method relies on representing the possible future evolution of an asset by a (recombining) tree. In this model, as in the Black-Scholes-Merton setup, there is a /risky asset/, an index or stock, and a /riskless asset/, a bond. The relevant time interval from today until the maturity of the option is divided in general into equidistant subintervals of length delta t. Given an index level at time s of S_s, the index level at t = s + detla t is given by S_t = S_s * m, where m is chosen randomly from {u, d} with 0 < d < e^{r delta t} < u = e^{sigma sqrt{delta t}}, as well as u = 1/d. r is the contant, riskless short rate.
+
+#+begin_src python
+import math
+
+S0 = 36.       # initial value of risky asset
+T = 1.0        # time horizon for the binomial tree simulation
+r = 0.06       # constant short rate
+sigma = 0.2    # constant volatility factor
+
+@timeit
+
+def simulate_tree(M):
+    dt = T / M  # length of time intervals
+    u = math.exp(sigma * math.sqrt(dt))
+    d = 1 / u   # factors for the upward and downward movements
+    S = np.zeros((M + 1, M + 1))
+    S[0, 0] = S0
+    z = 1
+    for t in range(1, M + 1):
+        for i in range(z):
+            S[i, t] = S[i, t-1] * u
+            S[i+1, t] = S[i, t-1] * d
+        z += 1
+    return S
+
+np.set_printoptions(formatter={'float': lambda x: '%6.2f' % x})
+
+simulate_tree(4)
+
+simulate_tree(500)
+
+# numpy
+M = 4
+up = np.arange(M + 1)
+up = np.resize(up, (M + 1, M + 1))
+down = up.T * 2
+up - down
+dt = T / M
+S0 * np.exp(sigma * math.sqrt(dt) * (up - down))
+
+def simulate_tree_np(M):
+    dt = T / M
+    up = np.arange(M + 1)
+    up = np.resize(up, (M + 1, M + 1))
+    down = up.transpose() * 2
+    S = S0 * np.exp(sigma * math.sqrt(dt) * (up - down))
+    return S
+
+
+start_time = time.perf_counter()
+simulate_tree_np(500)
+end_time = time.perf_counter()
+print(end_time - start_time)
+
+# numba
+simulate_tree_nb = numba.jit(simulate_tree)
+
+start_time = time.perf_counter()
+simulate_tree_nb(500)
+end_time = time.perf_counter()
+print(end_time - start_time)
+#+end_src
+
+* Monte Carlo Simulation
+
+This section analyzes the monte carlo simulation of the geometric Brownian motion
+
+Black-Scholes-Merton SDE (geometric Brownian motion)
+
+$dS_t = rS_tdt + \sigma S_t d Z_t$
+
+- S_t is the value of the underlying asset at time t
+- r is the constant, riskless short rate
+- sigma is the constant, instantaneous volatility
+- Z_t is a Brownian motion
+
+This SDE can be discretized over equidistant time intervals and simulated according to the equation below
+
+In this case, z is a standard normally distributed random number.
+
+Black-Scholes-Merton difference equation (Euler scheme)
+
+S_t = S_{t - \delta t} \exp{((r - \frac{\sigma^2}{2}) \delta t + \sigma \sqrt{\delta t} z)}
+
+The Monte Carlo estimator for a European call option is then given by:
+
+C_0 = e^{-rT} \frac{1}{I} \Sigma_I \max (S_T(i) - K, 0)
+
+where S_T(i) is the ith simulated value of the underlying asset at maturity T for a total number of simulated paths I with 1, 2, ..., I
+
+#+begin_src python
+M = 100         # number of time intervals for discretization
+I = 50000       # the number of paths to be simulated
+
+def mcs_simulation_py(p):
+    M, I = p
+    dt = T / M
+    S = np.zeros((M + 1, I))
+    S[0] = S0
+    rn = np.random.standard_normal(S.shape)  # The random numbers, drawn in a single vectorized step
+    for t in range(1, M + 1):                # The nested loop implementing the simulation based on the Euler scheme
+        for i in range(I):
+            S[t, i] = S[t-1, i] * math.exp((r - sigma ** 2 / 2) * dt + sigma * math.sqrt(dt) * rn[t, i])
+    return S
+
+
+start_time = time.perf_counter()
+S = mcs_simulation_py((M, I))
+end_time = time.perf_counter()
+print(end_time - start_time)
+
+S[-1].mean()                                               # the mean end-of-period value based on the simulation
+S0 * math.exp(r * T)                                       # the theoretically expected end-of-period value
+K = 40.                                                    # the strike price of the European put option
+C0 = math.exp(-r * T) * np.maximum(K - S[-1], 0).mean()    # the monte carlo estimator for the option
+C0
+
+# numpy
+def mcs_simulation_np(p):
+    M, I = p
+    dt = T / M
+    S = np.zeros((M + 1, I))
+    S[0] = S0
+    rn = np.random.standard_normal(S.shape)
+    for t in range(1, M + 1):
+        S[t] = S[t-1] * np.exp((r - sigma ** 2 / 2) * dt + sigma * math.sqrt(dt) * rn[t])
+    return S
+
+
+start_time = time.perf_counter()
+S = mcs_simulation_np((M, I))
+end_time = time.perf_counter()
+print(end_time - start_time)
+
+# numba
+mcs_simulation_nb = numba.jit(mcs_simulation_py)
+
+start_time = time.perf_counter()
+S = mcs_simulation_nb((M, I))
+end_time = time.perf_counter()
+print(end_time - start_time)
+
+# multiprocessing
+import multiprocessing as mp
+
+pool = mp.Pool(processes=32)
+p = 32
+
+start_time = time.perf_counter()
+np.hstack(pool.map(mcs_simulation_np, p * [(M, (int(I / p)))]))
+end_time = time.perf_counter()
+print(end_time - start_time)
+#+end_src
+
+* Recursive pandas Algorithms
+
+This section addresses the implementation of recursive functions on financial time series data stored in a pandas DataFrame object.
+Certain recursive algorithms are hard or impossible to vectorize, leaving the financial analyst with slowly executed python loops on dataframes.
+
+The examples that follow implement what is called the /exponentially weighted moving average/ in a simple form
+
+#+begin_src python
+def ewma(t, s0, alpha):
+    if t == 0:
+        return s0
+    else:
+        return alpha * t + (1 - alpha) * ewma(t - 1, s0, alpha)
+
+
+ewma(10, 1, 0.4)
+
+# python
+import pandas as pd
+
+sym = 'SPY'
+
+data = pd.read_csv('data/tr_eikon_eod_data.csv', index_col=0, parse_dates=True)[sym].to_frame().dropna()
+
+alpha = 0.25
+
+data['EWMA'] = data[sym]
+
+
+start_time = time.perf_counter()
+for t in zip(data.index, data.index[1:]):
+    data.loc[t[1], 'EWMA'] = (alpha * data.loc[t[1], sym] + (1 - alpha) * data.loc[t[0], 'EWMA'])
+end_time = time.perf_counter()
+print(end_time - start_time)
+
+data.head()
+
+data[data.index > '2017-1-1'].plot()
+plt.show()
+
+# more generally
+def ewma_py(x, alpha):
+    y = np.zeros_like(x)
+    y[0] = x[0]
+    for i in range(1, len(x)):
+        y[i] = alpha * x[i] + (1 - alpha) * y[i-1]
+    return y
+
+start_time = time.perf_counter()
+data['EWMA_PY'] = ewma_py(data[sym], alpha)
+end_time = time.perf_counter()
+print(end_time - start_time)
+
+# numba
+ewma_nb = numba.jit(ewma_py)
+
+start_time = time.perf_counter()
+data['EWMA_NB'] = ewma_nb(data[sym], alpha)
+end_time = time.perf_counter()
+print(end_time - start_time)
+#+end_src

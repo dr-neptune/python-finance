@@ -1,1 +1,203 @@
 #+TITLE: Input/Output Operations
+
+* Working with SQL Databases
+
+#+begin_src python
+import sqlite3 as sq3
+
+con = sq3.connect(path + 'nums.db')
+query = 'CREATE TABLE nums (Date date, No1 real, No2 real)'
+con.execute(query)
+con.commit()
+q = con.execute
+
+q('SELECT * FROM sqlite_master').fetchall()
+
+# populate it with data
+import datetime
+
+now = datetime.datetime.now()
+
+q('INSERT INTO nums VALUES(?, ?, ?)', (now, 0.12, 7.3))
+
+np.random.seed(8888)
+
+df = np.random.standard_normal((10000, 2)).round(4)
+
+for row in df:
+    now = datetime.datetime.now()
+    q('INSERT INTO nums VALUES(?, ?, ?)', (now, row[0], row[1]))
+
+con.commit()
+
+q('SELECT * FROM nums').fetchmany(4)
+
+q('DROP TABLE IF EXISTS nums')
+con.close()
+
+# another one
+df = np.random.standard_normal((10000000, 5)).round(4)
+fname = path + 'numbers'
+con = sq3.Connection(fname + '.db')
+query = 'CREATE TABLE numbers (No1 real, No2 real, No3 real, No4 real, No5 real)'
+
+q = con.execute
+qm = con.executemany
+
+q(query)
+qm('INSERT INTO numbers VALUES (?, ?, ?, ?, ?)', df)
+con.commit()
+
+temp = q('SELECT * FROM numbers').fetchall()
+print(temp[:3])
+
+query = 'SELECT * FROM numbers WHERE No1 > 0 AND No2 < 0'
+res = np.array(q(query).fetchall()).round(3)
+
+res = res[::100]
+
+plt.figure()
+plt.plot(res[:, 0], res[:, 1], 'ro')
+plt.show()
+
+h5s = pd.HDFStore(fname + '.h5s', 'w')
+h5s['df'] = pd.DataFrame(df)
+h5s.close()
+
+h5s = pd.HDFStore(fname + '.h5s', 'r')
+data_ = h5s['df']
+data_ is df
+(data_ == df).all()
+#+end_src
+
+* I/O with pytables
+
+PyTables is a Python binding for the HDF5 database standard
+It is designed to optimize the performance of I/O operations and make best use of the available hardware
+
+#+begin_src python
+import tables as tb
+import datetime as dt
+
+fname = path + 'pytab.h5'
+h5 = tb.open_file(fname, 'w')
+
+row_des = {
+    'Date': tb.StringCol(26, pos=1),
+    'No1': tb.IntCol(pos=2),
+    'No2': tb.IntCol(pos=3),
+    'No3': tb.Float64Col(pos=4),
+    'No4': tb.Float64Col(pos=5)
+    }
+rows = 2000000
+
+filters = tb.Filters(complevel=0)  # specify compression level
+
+tab = h5.create_table('/', 'ints_floats',
+                      row_des,
+                      title='Integers and Floats',
+                      expectedrows=rows,
+                      filters=filters)
+
+type(tab)
+tab
+
+# populate the table with numerical data
+pointer = tab.row
+ran_int = np.random.randint(0, 10000, size=(rows, 2))
+ran_flo = np.random.standard_normal((rows, 2)).round(4)
+
+for i in range(rows):
+    pointer['Date'] = dt.datetime.now()
+    pointer['No1'] = ran_int[i, 0]
+    pointer['No2'] = ran_int[i, 1]
+    pointer['No3'] = ran_int[i, 0]
+    pointer['No4'] = ran_int[i, 1]
+    pointer.append()
+
+tab.flush()
+tab
+
+# pytables also provides tools to query data
+query = '((No3 < -0.5) | (No3 > 0.5)) & ((No4 < -1) | (No4 > 1))'
+iterator = tab.where(query)
+#+end_src
+
+* Working with Compressed Tables
+
+when I/O is the bottleneck and the CPU is able to (de)compress data fast, the net effect of compression in terms of speed might be positive
+
+#+begin_src python
+fname = path + 'pytabc.h5'
+
+h5c = tb.open_file(fname, 'w')
+
+filters = tb.Filters(complevel=5,
+                     complib='blosc')
+
+# the complevel (compression level) can take values between 0 and 9 (lowest -> highest)
+# the Blosc compression engine is used
+
+dty = np.dtype([('Date', 'S26'),
+                ('No1', '<i4'),
+                ('No2', '<i4'),
+                ('No3', '<f8'),
+                ('No4', '<f8')])
+
+sarray = np.zeros(100, dtype=dty)
+
+rows = 100000
+
+tabc = h5c.create_table('/', 'ints_floats', sarray,
+                        title='Integers and Floats',
+                        expectedrows=rows, filters=filters)
+
+query = '((No3 < -0.5) | (No3 > 0.5)) & ((No4 < -1) | (No4 > 1))'
+
+iteratorc = tabc.where(query)
+
+[(row['No3'], row['No4']) for row in iteratorc]
+#+end_src
+
+* Out of Memory Computations
+
+pytables supports array based computations that do not fit in memory
+
+#+begin_src python
+filename = path + 'earray.h5'
+
+h5 = tb.open_file(filename, 'w')
+
+n = 500
+
+ear = h5.create_earray('/', 'ear',
+                       atom=tb.Float64Atom(),
+                       shape=(0, n))
+
+tb.earray.EArray
+
+rand = np.random.standard_normal((n, n))
+
+for _ in range(750):
+    ear.append(rand)
+ear.flush()
+
+ear.size_on_disk
+
+# for out of memory computations that do not lead to aggregations, another EArray object of the same size is needed
+# pytables has a special module to cope with numerical expressions efficiently.
+
+out = h5.create_earray('/', 'out',
+                       atom=tb.Float64Atom(),
+                       shape=(0, n))
+
+out.size_on_disk
+
+expr = tb.Expr('3 * sin(ear) + sqrt(abs(ear))')
+
+expr.set_output(out, append_mode=True)
+
+expr.eval()
+
+out.size_in_memory / 10**6
+#+end_src
