@@ -1,4 +1,18 @@
-# Random Numbers
+#+TITLE: Chapter 12: Stochastics
+
+This chapter introduces the following topics from a Python perspective:
+
+- Random Numbers
+- Simulation
+- Valuation
+  The 2 main disciplines when it comes to valuation are the valuation of derivatives with European exercise (at a specific date) and
+  American exercise (over a specific time interval); there are also instruments with Bermudan exercise (exercise at a finite set of specific dates)
+- Risk Measures
+  Calculation of risk measures like value-at-risk, credit value-at-risk, and credit valuation adjustments
+
+* Random Numbers
+
+#+begin_src python
 import math
 import numpy as np
 import numpy.random as npr
@@ -33,8 +47,22 @@ ax3.set_ylabel('frequency')
 ax4.hist(rn4, bins=25)
 ax4.set_title('choice')
 plt.show()
+#+end_src
 
-# Simulation
+* Simulation
+
+Consider the Black-Scholes-Merton setup for option pricing. In their setup, the level of a stock index S_t at a future date T given a level S0 as of today is given according to
+
+S_T = S_0 \exp{((r - \frac{1}{2} \sigma_2) T + \sigma \sqrt{T} z)}
+
+where
+- S_T is the index level at date T
+- r is the constant riskless short rate
+- \sigma is the constant volatility (= standard deviation of returns) of S
+- z is the standard normally distributed random variable
+
+
+#+begin_src python
 S0 = 100
 r = 0.05
 sigma = 0.25
@@ -62,5 +90,10 @@ import scipy.stats as scs
 
 scs.describe(ST1)
 scs.describe(ST2)
+#+end_src
 
-# Stochastic Processes
+* Stochastic Processes
+
+#+begin_src python
+
+#+end_src
