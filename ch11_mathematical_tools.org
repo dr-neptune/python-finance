@@ -1,0 +1,44 @@
+#+TITLE: Chapter 11: Mathematical Tools
+
+This chapter covers:
+- Approximation
+- Convex Optimization
+- Integration
+- Symbolic Computation
+
+* Approximation
+
+#+begin_src python
+import pandas as pd
+#+end_src
+
+* Regression
+
+Minimization problem of regression
+
+$\min_{\alpha_1, ..., \alpha_n} \frac{1}{I} \Sigma_{i=1}^I (y_i - \Sigma_{d=1}^D \alpha_d \cdot b_d(x_i))^2$
+
+The author mentions the use of monomial functions as basis functions
+
+* Interpolation
+
+Remember that sorted (and non-noisy) data is required and that the approach is limited to low-dimensional problems. It is also comparatively computationally demanding compared to regression.
+
+* Convex Optimization
+
+*** Constrained Optimization
+
+Consider the utility maximization problem of an investor who can invest in 2 risky securities. Both securities cost q_a = q_b = 10 USD today. After one year, they have a payoff of 15 USD and 5 USD, respectively, in state d. Both states are equally likely. Denote the vector payoffs for the two securities by r_a and r_b respectively.
+
+The investor has a budget of w_0 = 100 USD to invest and derives utility from future wealth according to the utility function u(w) = \sqrt{w} where w is the wealth available.
+
+We can formulate our problem like so:
+
+max_{a, b} E(u(w_1)) = p \sqrt{w_{1u}} + (1 - p) \sqrt{w_{1d}}
+w_1 = a \cdot r_a + b \cdot r_b
+w_0 \geq a \cdot q_a + b \cdot q_b
+a, b \geq 0
+
+* Integration
+
+In valuation and option pricing, integration is an important tool. Risk-neutral values of derivatives can be expressed in general as the discounted expectation of their payoff under the risk-neutral or martingale measure. The expectation in turn is a sum in the discrete case and an integral in the continuous case.
