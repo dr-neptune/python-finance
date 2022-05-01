@@ -42,3 +42,7 @@ a, b \geq 0
 * Integration
 
 In valuation and option pricing, integration is an important tool. Risk-neutral values of derivatives can be expressed in general as the discounted expectation of their payoff under the risk-neutral or martingale measure. The expectation in turn is a sum in the discrete case and an integral in the continuous case.
+
+** Numerical Integration
+
+The scipy.integrate subpackage contains a selection of functions to numerically integrate a given mathematical function for upper and lower integration limits.

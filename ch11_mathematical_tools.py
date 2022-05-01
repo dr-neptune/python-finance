@@ -282,3 +282,9 @@ y = f(x)
 a, b = 0.5, 9.5
 Ix = np.linspace(a, b)
 Iy = f(Ix)
+
+# Numerical Integration
+
+sci.fixed_quad(f, a, b)  # fixed Gaussian quadrature
+sci.quad(f, a, b)        # adaptive quadrature
+sci.romberg(f, a, b)     # Romberg integration
