@@ -56,10 +56,10 @@ Consider the Black-Scholes-Merton setup for option pricing. In their setup, the 
 S_T = S_0 \exp{((r - \frac{1}{2} \sigma_2) T + \sigma \sqrt{T} z)}
 
 where
-- S_T is the index level at date T
-- r is the constant riskless short rate
-- \sigma is the constant volatility (= standard deviation of returns) of S
-- z is the standard normally distributed random variable
+- $S_T$ is the index level at date $T$
+- $r$ is the constant riskless short rate
+- $\sigma$ is the constant volatility (= standard deviation of returns) of $S$
+- $z$ is the standard normally distributed random variable
 
 
 #+begin_src python
@@ -94,6 +94,819 @@ scs.describe(ST2)
 
 * Stochastic Processes
 
-#+begin_src python
+A stochastic process is roughly a sequence of random variables. In that sense, one should expect something similar to a sequence of repeated simulations of a random variable when simulating a process. This is mainly true, apart from the fact that the draws are typically not independent, but rather dependent on the result(s) of the previous draw(s).
 
+In general, stochastic processes used in finance exhibit the /Markov Property/, which mainly says that tomorrow's value of the process only depends on today's state of the process, and not any other more "historic" state of even the whole path history. The process then is also called /memoryless/
+
+** Geometric Brownian Motion
+
+Stochastic Differential Equation in Black-Scholes-Merton setup:
+
+$dS_t = rS_t dt + \sigma S_t dZ_t$
+
+Here:
+- $Z_t$ is a standard Brownian motion
+- The values of $S_t$ are log-normally distributed
+- The marginal returns $\frac{dS_t}{S_t}$
+
+We can discretize this exactly by an Euler scheme.
+
+Simulating index levels dynamically in Black-Scholes-Merton setup:
+
+$S_t = S_{t - \delta t} \exp{((r - \frac{1}{2} \sigma^2) \Delta t + \sigma \sqrt{\Delta t}z_t)}$
+
+where:
+- $\Delta t$ is the fixed discretization interval
+- $z_t$ is a standard normally distributed random variable
+
+#+begin_src python
+I = 10000                   # the number of paths to be simulated
+M = 50                      # the number of time intervals for the discretization
+dt = T / M                  # the length of the time interval in year fractions
+S = np.zeros((M + 1, I))    # the 2D ndarray object for the index levels
+S[0] = S0                   # the initial values for the initial point in time t = 0
+
+# simulation via semivectorized expression
+for t in range(1, M + 1):
+    S[t] = S[t - 1] * np.exp((r - 0.5 * sigma ** 2) * dt + sigma * math.sqrt(dt) * npr.standard_normal(I))
+
+# view dynamically simulated geometric Brownian motion at maturity
+plt.figure()
+plt.hist(S[-1], bins=50)
+plt.xlabel('index level')
+plt.ylabel('frequency')
+plt.show()
+
+# view dynamically simulated geometric Brownian motion paths
+plt.figure()
+plt.plot(S[:, :10], lw=1.5)
+plt.xlabel('time')
+plt.ylabel('index level')
+plt.show()
+#+end_src
+
+using the dynamic simulation approach not only allows us to visualize paths, but also to value options with American/Bermudan exercise or options whose payoff is path-dependent. One gets the full dynamic picture over time.
+
+** Square-root Diffusion
+
+Another important class of financial processes is /mean-reverting processes/, which are used to model short rates or volatility processes, for example. A popular and widely used model is the square-root diffusion, as proposed by Cox, Ingersooll, and Ross.
+
+Stochastic differential equation for square-root diffusion
+
+$d x_t = \kappa (\theta - x_t) dt + \sigma \sqrt{x_t}d Z_t$
+
+where:
+
+- $x_t$ is the process level at date $t$
+- $\kappa$ is the mean-reversion factor
+- $\theta$ is the long-term mean of the process
+- $\sigma$ is the constant volatility parameter
+- $Z_t$ is the standard Brownian motion
+
+It is well known that $x_t$ is Chi-square distributed. However, many financial models can be discretized and approximated by using the normal distribution (i.e., a so-called Euler discretization scheme).
+
+While the Euler scheme is exact for the geometric Brownian motion, it is biased for the majority of other stochastic processes. Even if there is an exact scheme available (one for the square root diffusion will be presented later) the use of an Euler scheme might be desirable for numerical and/or computational reasons.
+
+Euler discretization for square-root diffusion using a full truncation
+
+$\tilde{x_t} = \tilde{x_s} + \kappa(\theta - \tilde{x_s}^{+}) \Delta t + \sigma \sqrt{\tilde{x_s}^{+}} \sqrt{\Delta t} z_t$
+""
+where:
+- $s = t - \Delta t$
+- $x^{+} = \max{x, 0}$
+
+The square-root diffusion has the convenient and realistic characteristic that the values of $x_t$ remain strictly positive.
+
+#+begin_src python
+x0 = 0.05        # the initial value (for a short rate)
+kappa = 3.0      # the mean reversion factor
+theta = 0.02     # the long-term mean value
+sigma = 0.1      # the volatility factor
+I = 10000
+M = 50
+dt = T/M
+
+def srd_euler():
+    xh = np.zeros((M + 1, I))
+    x = np.zeros_like(xh)
+    xh[0] = x0
+    x[0] = x0
+    for t in range(1, M + 1):
+        xh[t] = (xh[t - 1] +
+                 kappa * (theta - np.maximum(xh[t - 1], 0)) * dt +
+                 sigma * np.sqrt(np.maximum(xh[t - 1], 0)) *
+                 math.sqrt(dt) * npr.standard_normal(I))            # the simulation based on an Euler scheme
+    x = np.maximum(xh, 0)
+    return x
+
+x1 = srd_euler()
+
+# dynamically simulation square-root diffusion at maturity
+plt.figure()
+plt.hist(x1[-1], bins=50)
+plt.xlabel('value')
+plt.ylabel('frequency')
+plt.show()
+
+# dynamically simulated square-root diffusion paths (Euler scheme)
+plt.figure()
+plt.plot(x1[:, :10], lw=1.5)
+plt.xlabel('time')
+plt.ylabel('index level')
+plt.show()
+#+end_src
+
+We can also look at the exact discretization scheme for the square-root diffusion based on the non-central chi-square distribution $\chi_d^2$ with $df = \frac{4 \theta \kappa}{\sigma^2}$ degrees of freedom and noncentrality parameter:
+
+$nc = \frac{4 \kappa e^{- \kappa \Delta t}}{\sigma^2 (1 - e^{- \kappa \Delta t})} x_s$
+
+Exact discretization for square-root diffusion:
+
+$x_t = \frac{\sigma^2 (1 - e^{- \kappa \Delta t})}{4 \kappa} \chi_d^2(\frac{4 \kappa e^{- \kappa \Delta t}}{\sigma^2 (1 - e^{- \kappa \Delta t})} x_s)$
+
+#+begin_src python
+def srd_exact():
+    # make space
+    x = np.zeros((M + 1, I))
+    x[0] = x0
+    for t in range(1, M + 1):
+        df = 4 * theta * kappa / sigma ** 2
+        c = (sigma ** 2 * (1 - np.exp(- kappa * dt))) / (4 * kappa)
+        nc = np.exp(- kappa * dt) / c * x[t - 1]
+        x[t] = c * npr.noncentral_chisquare(df, nc, size=I)
+    return x
+
+x2 = srd_exact()
+
+# exact discretization scheme making use of npr.noncentral_chisquare
+plt.figure()
+plt.hist(x2[-1], bins=50)
+plt.xlabel('value')
+plt.ylabel('frequency')
+plt.show()
+
+# first 10 simulated paths
+plt.figure()
+plt.plot(x2[:, :10], lw=1.5)
+plt.xlabel('time')
+plt.ylabel('index level')
+plt.show()
+#+end_src
+
+** Stochastic Volatility
+
+One of the major simplifying assumptions of the Black-Scholes-Merton model is the constant volatility. Volatility in general is neither constant, nor deterministic -- it is stochastic. A major achievement with regard to financial modeling was achieved in the early 90s with the introduction of /stochastic volatility models/.
+
+One of the most popular models that fall into that category is that of Heston
+
+Stochastic differential equations for Heston stochastic volatility model
+
+$dS_t = r S_t dt + \sqrt{v_t} S_t dZ_t^{(1)}$
+
+$dv_t = \kappa_v (\theta_v - v_t) dt + \sigma_v \sqrt{v_t} d Z_t^{(2)}$
+
+$dZ_t^{(1)} d Z_t^{(2)} = \rho$
+
+where:
+
+- $S_T$ is the index level at date $T$
+- $r$ is the constant riskless short rate
+- $\sigma$ is the constant volatility (= standard deviation of returns) of $S$
+- $z$ is the standard normally distributed random variable
+- $\kappa$ is the mean-reversion factor
+- $Z_t$ is the standard Brownian motion
+- $\rho$ represents the instantaneous correlation between the two standard Brownian motions $Z_t^1, Z_t^2$.
+  This allows us to account for a stylized fact called the /leverage effect/, which in essence states
+  that volatility goes up in times of stress (declining markets) and goes down in times of a
+  bull market (rising markets)
+
+#+begin_src python
+S0 = 100.
+r = 0.05
+v0 = 0.1       # initial (instantaneous) volatility value
+kappa = 3.0
+theta = 0.25
+sigma = 0.1
+rho = 0.6      # fixed correlation between the two Brownian motions
+T = 1.0
+
+corr_mat = np.zeros((2, 2))
+corr_mat[0, :] = [1.0, rho]
+corr_mat[1, :] = [rho, 1.0]
+cho_mat = np.linalg.cholesky(corr_mat)  # cholesky decomposition
+
+cho_mat
+#+end_src
+
+Before the start of the simulation of the stochastic processes the whole set of random numbers for both processes is generated, looking to use set 0 for the index process and set 1 for the volatility process.
+
+For the volatility process modeled by a square-root diffusion, the Euler scheme is chosen, taking into account the correlation via the Cholesky matrix
+
+#+begin_src python
+M = 50
+I = 10000
+dt = T / M
+
+ran_num = npr.standard_normal((2, M + 1, I))    # generates the 3 dimensional random number data set
+
+v = np.zeros_like(ran_num[0])
+vh = np.zeros_like(v)
+
+v[0] = v0
+vh[0] = v0
+
+for t in range(1, M + 1):
+    # picks out the relevant random number subset and transforms it
+    # via the Cholesky matrix
+    ran = np.dot(cho_mat, ran_num[:, t, :])
+    vh[t] = (vh[t - 1] +
+             kappa * (theta - np.maximum(vh[t - 1], 0)) * dt +
+             sigma * np.sqrt(np.maximum(vh[t - 1], 0)) *
+             math.sqrt(dt) * ran[1])  # simulates the paths based on an Euler scheme
+
+v = np.maximum(vh, 0)
+#+end_src
+
+The simulation of the index level process also takes into account the correlation and uses the (in this case) exact Euler scheme for the geometric Brownian motion.
+
+#+begin_src python
+S = np.zeros_like(ran_num[0])
+S[0] = S0
+for t in range(1, M + 1):
+    ran = np.dot(cho_mat, ran_num[:, t, :])
+    S[t] = S[t - 1] * np.exp((r - 0.5 * v[t]) * dt +
+                             np.sqrt(v[t]) * ran[0] * np.sqrt(dt))
+
+fig, (ax1, ax2) = plt.subplots(1, 2)
+ax1.hist(S[-1], bins=50)
+ax1.set_xlabel('index level')
+ax1.set_ylabel('frequency')
+ax2.hist(v[-1], bins=50)
+ax2.set_xlabel('volatility')
+plt.show()
+
+fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+ax1.plot(S[:, :10], lw=1.5)
+ax1.set_ylabel('index level')
+ax2.plot(v[:, :10], lw=1.5)
+ax2.set_xlabel('time')
+ax2.set_ylabel('volatility')
+plt.show()
+#+end_src
+
+** Jump Diffusion
+
+Stochastic volatility and the leverage effect are stylized (empirical) facts found in a number of markets. Another important stylized fact is the existence of /jumps/ in asset prices, and, for example, volatility.
+
+In 1976 Merton published his jump diffusion model, enhancing the Black-Scholes-Merton setup through a model component generating jumps with log-normal distribution.
+
+Stochastic differential equation for Merton jump diffusion model
+
+$dS_t = (r - r_j) S_t dt + \sigma S_t dZ_t + J_t S_t d N_t$
+
+where:
+
+- $S_t$ is the index level at date $t$
+- $r$ is the constant riskless short rate
+- $r_j \equiv \lambda \cdot (e^{\mu_j + \delta^2 / 2} - 1)$ is the drift correction for jump to maintain risk neutrality
+- $\sigma$ is the constant volatility of $S$
+- $Z_t$ is the standard Brownian motion
+- $J_t$ is the jump at date $t$ with distribution
+  - $\log{1 + J_t} \approx N(\log{1 + \mu_j} - \frac{\delta^2}{2}, \delta^2)$ with $N$ as the cumulative distribution function of a standard normal random variable
+- $N_t$ is a Poisson process with intensity $\lambda$
+
+We can do an Euler discretization for the Merton jump diffusion model:
+
+$S_t = S_{t - \Delta t} (e^{(r - r_j - \sigma^2/2)\Delta t + \sigma_r \sqrt{\Delta t} z_t^1} + (e^{\mu_j + \delta z_t^2 - 1} y_t))$
+
+where:
+
+- $z_t^n$ are standard normally distributed
+- $y_t \sim \mathrm{Poisson(\lambda)}$
+
+#+begin_src python
+S0 = 100.
+r = 0.05
+sigma = 0.2
+lamb = 0.75    # the jump intensity
+mu = -0.6      # the mean jump size
+delta = 0.25   # the jump volatility
+rj = lamb * (math.exp(mu + 0.5 * delta ** 2) - 1)  # the drift correction
+
+T = 1.0
+M = 50
+I = 10000
+dt = T / M
+
+
+S = np.zeros((M + 1, I))
+S[0] = S0
+sn1 = npr.standard_normal((M + 1, I))
+sn2 = npr.standard_normal((M + 1, I))
+poi = npr.poisson(lamb * dt, (M + 1, I))
+
+for t in range(1, M + 1, 1):
+    S[t] = S[t - 1] * (np.exp((r - rj - 0.5 * sigma ** 2) * dt +
+                              sigma * math.sqrt(dt) * sn1[t]) +
+                              (np.exp(mu + delta * sn2[t]) - 1) *
+                              poi[t])
+    S[t] = np.maximum(S[t], 0)
+
+# dynamically simulated jump diffusion process at maturity
+plt.figure()
+plt.hist(S[-1], bins=50)
+plt.xlabel('value')
+plt.ylabel('frequency')
+plt.show()
+
+# dynamically simulated jump diffusion process paths
+# the negative jumps can also be spotted in the first 10 simulated index level paths
+plt.figure()
+plt.plot(S[:, :10], lw=1.5)
+plt.xlabel('time')
+plt.ylabel('index level')
+plt.show()
+#+end_src
+
+* Variance Reduction
+
+Because the python functions used so far generate pseudo-random numbers and due to the varying sizes of the samples drawn, the resulting sets of numbers might not exhibit statistics close enough to the expected or desired ones.
+
+Fortunately, there are easy to implement, generic variance reduction techniques available to improve the matching of the first two moments of the (standard) normal distribution.
+
+The first technique is to use *antithetic variates*. This approach simply draws only half the desired number of random draws, and adds the same set of random numbers with the opposite sign afterward.
+
+#+begin_src python
+sn = npr.standard_normal(int(10000 / 2))
+sn = np.concatenate((sn, -sn))
+
+np.shape(sn)
+
+sn.mean()
+
+
+print('%15s %15s' % ('Mean', 'Std. Deviation'))
+print(31 * '-')
+for i in range(1, 31, 2):
+    npr.seed(1000)
+    sn = npr.standard_normal(i ** 2 * int (10000 / 2))
+    sn = np.concatenate((sn, -sn))
+    print('%15.12f %15.12f' % (sn.mean(), sn.std()))
+#+end_src
+
+This approach corrects the first moment perfectly, but it does not have any influence on the second moment, the standard deviation.
+
+Using another variance reduction technique called /moment matching/ helps correct in one step both the first and second moments:
+
+#+begin_src python
+sn = npr.standard_normal(10000)
+
+sn.mean()
+sn.std()
+
+sn_new = (sn - sn.mean()) / sn.std()
+
+sn_new.mean()
+sn_new.std()
+
+def gen_sn(M, I, antithetic_paths=True, moment_match=True):
+    """
+    Generates random numbers for simulation.
+
+    Can also use antithetic variates and/or moment matching to fix the first 2 moments
+    """
+    if anti_paths:
+        sn = npr.standard_normal((M + 1, int(I / 2)))
+        sn = np.concatenate((sn, -sn), axis=1)
+    else:
+        sn = npr.standard_normal((M + 1, I))
+
+    if moment_match:
+        sn = (sn - sn.mean()) / sn.std()
+
+    return sn
+#+end_src
+
+* Valuation
+
+One of the most important applications of Monte Carlo simulation is the /valuation of contingent claims/ (options, derivatives, hybrid instruments, etc). Simply stated, in a risk-neutral world, the value of a contingent claim is the discounted expected payoff under the risk-neutral (martingale) measure. This is the probability measure that makes all risk factors (stocks, indices, etc) drift at the riskless short rate, making the discounted processes martingales.
+
+According to the Fundamental Theorem of Asset Pricing, the existence of such a probability measure is equivalent to the absence of arbitrage.
+
+A financial option embodies that right to buy (call option) or sell (put option) a specified financial instrument at a given maturity rate (European option), or over a specified period of time (American option), at a given price (strike price).
+
+** European Options
+
+The payoff of a European call option on an index at maturity is given by $h(S_T) \equiv \max{(S_T - K, 0)}$, where $S_T$ is the index level at maturity date $T$ and $K$ is the strike price. Given a, or in the complete markets, /the/, risk-neutral measure for the relevant stochastic process (e.g. Geometric Brownian Motion), the price of such an option is given by the formula:
+
+Pricing by risk-neutral expectation
+
+$C_0 = e^{-rT}E_0^Q(h(S_T)) = e^{-rT} \int_0^\infty h(s) q(s) ds$
+
+Here is the respective Monte Carlo estimator for the European option, where $\tilde{S_T^i}$ is the $T$th simulated index level at maturity.
+
+$\tilde{C_0} = e^{-rT}\frac{1}{I} \Sigma_{i = 1}^I h(\tilde{S_T}^i)$
+
+#+begin_src python
+S0 = 100.
+r = 0.05
+sigma = 0.25
+T = 1.0
+I = 50000
+
+def gbm_mcs_stat(K):
+    """
+    Valuation of European call option in Black-Scholes-Merton by Monte Carlo simulation
+    (of index level at maturity).
+
+    Args:
+        K: the (positive) strike price of the option
+
+    Returns:
+        C0: estimated present value of European call option
+    """
+    sn = gen_sn(1, I)
+    # simulate index level at maturity
+    ST = S0 * np.exp((r - 0.5 * sigma ** 2) * T
+                     + sigma * math.sqrt(T) * sn[1])
+    # calculate payoff at maturity
+    hT = np.maximum(ST - K, 0)
+    # calculate MSC estimator
+    C0 = math.exp(-r * T) * np.mean(hT)
+    return C0
+
+gbm_mcs_stat(105.)  # the monte carlo estimator for the European call option
+#+end_src
+
+Next, consider the dynamic simulation approach and allow for European put options in addition to the call option. The function :gbm_mcs_dyna() implements the algorithm. The code also compares option price estimates for a call and a put stroke at the same level
+
+#+begin_src python
+M = 50  # The number of intervals for the discretization
+
+def gbm_mcs_dyna(K, option='call'):
+    """
+    Geometric Brownian Motion Monte Carlo Simulation Dynamic
+    Valuation of European options in Black-Scholes-Merton by Monte Carlo simulation (of index level paths)
+
+    Args:
+        K: (positive) strike price of the option
+        option: type of the option to be valued ('call', 'put')
+
+    Returns:
+        C0: estimated present value of European call option
+    """
+    dt = T / M
+    # simulation of index level paths
+    S = np.zeros((M + 1, I))
+    S[0] = S0
+    sn = gen_sn(M, I)
+    for t in range(1, M + 1):
+        S[t] = S[t - 1] * np.exp((r - 0.5 * sigma ** 2) * dt
+                                 + sigma * math.sqrt(dt) * sn[t])
+    # case-based calculation of payoff
+    if option == 'call':
+        hT = np.maximum(S[-1] - K, 0)
+    else:  # put
+        hT = np.maximum(K - S[-1], 0)
+    # calculation of MCS estimator
+    C0 = math.exp(-r * T) * np.mean(hT)
+    return C0
+
+gbm_mcs_dyna(110., option='call')  # Monte Carlo estimator value for the European call option
+gbm_mcs_dyna(110., option='put')   # Monte Carlo estimator value for the European put option
+#+end_src
+
+The question is how well these simulation-based valuation approaches perform relative to the benchmark value from the Black-Scholes-Merton valuation formula.
+
+To find out, the following code generates respective option values/estimates for a range of strike prices, using the analytical option pricing formula for European calls found in the module `bsm_functions.py`.
+
+#+begin_src python
+from bsm_functions import bsm_call_value
+
+stat_res, dyna_res, anal_res = [], [], []   # instantiates empty list objects to collect results
+k_list = np.arange(80., 120.1, 5.)          # creates an ndarray obj containing a range of strike prices
+np.random.seed(100)
+
+# simulates / calculates and collects the option values for all strike prices
+for K in k_list:
+    stat_res.append(gbm_mcs_stat(K))
+    dyna_res.append(gbm_mcs_dyna(K))
+    anal_res.append(bsm_call_value(S0, K, T, r, sigma))
+
+# transforms the list objs to ndarray objs
+stat_res, dyna_res, anal_res = [np.array(a) for a in [stat_res, dyna_res, anal_res]]
+
+# analytical option values vs. Monte Carlo estimators (static simulation)
+plt.figure()
+fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+ax1.plot(k_list, anal_res, 'b', label='analytical')
+ax1.plot(k_list, stat_res, 'ro', label='static')
+ax1.set_ylabel('European call option value')
+ax1.legend(loc=0)
+ax1.set_ylim(bottom=0)
+wi = 1.0
+ax2.bar(k_list - wi / 2, (anal_res - stat_res) / anal_res * 100, wi)
+ax2.set_xlabel('strike')
+ax2.set_ylabel('difference in %')
+ax2.set_xlim(left=75, right=125)
+plt.show()
+
+# analytical option values vs. Monte Carlo estimators (dynamic simulation)
+fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+ax1.plot(k_list, anal_res, 'b', label='analytical')
+ax1.plot(k_list, dyna_res, 'ro', label='dynamic')
+ax1.set_ylabel('European call option value')
+ax1.legend(loc=0)
+ax1.set_ylim(bottom=0)
+wi = 1.0
+ax2.bar(k_list - wi / 2, (anal_res - dyna_res) / anal_res * 100, wi)
+ax2.set_xlabel('strike')
+ax2.set_ylabel('difference in %')
+ax2.set_xlim(left=75, right=125)
+plt.show()
+#+end_src
+
+* American Options
+
+The valuation of American options is more involved compared to European options. In this case, an /optimal stopping/ problem has to be solved to come up with a fair value of the option. The problem formulation is already based on a discrete time grid for use with numerical simulation. In a sense, it is therefore more correct to speak of an option value given /Bermudan/ exercise. For the time interval converging to zero length, the value of the Bermudan option converges to the one of the American option.
+
+American option prices as optimal stopping problem
+
+$V_0 = \sup_{\tau \in \{0, \Delta t, 2 \Delta t, ..., T\}} e^{-rT}E_0^Q(h_\tau (S_\tau))$
+
+Least-squares regression for American option valuation (Least-Squares Monte Carlo)
+
+$\min_{\alpha_1, ..., \alpha_{D,t}} \frac{1}{I} \Sigma_{i = 1}^I (Y_{t, i} - \Sigma_{d = 1}^D \alpha_{d, t} \cdot b_d(S_{t, k}))^2$
+
+The function `gbm_mcs_amer()` implements the LSM algorithm for both American call and put options:
+
+#+begin_src python
+def gbm_mcs_amer(K, option='call'):
+    """
+    Valuation of American option in Black-Scholes-Merton by Monte Carlo simulation by LSM algorithm
+
+    Args:
+        K: (positive) strike price of the option
+        option: type of the option to be valued ('call', 'put')
+
+    Returns:
+        C0: estimated present value of American call option
+    """
+    dt = T / M
+    df = math.exp(-r * dt)
+    # simulation of index levels
+    S = np.zeros((M + 1, I))
+    S[0] = S0
+    sn = gen_sn(M, I)
+
+    for t in range(1, M + 1):
+        S[t] = S[t - 1] * np.exp((r - 0.5 * sigma ** 2) * dt
+                                 + sigma * math.sqrt(dt) * sn[t])
+
+    # case based calculation of payoff
+    if option == 'call':
+        h = np.maximum(S - K, 0)
+    else:
+        if option != 'put':
+            print("option != 'call'. Assuming 'put'")
+        h = np.maximum(K - S, 0)
+
+    # LSM algorithm
+    V = np.copy(h)
+
+    for t in range(M - 1, 0, -1):
+        reg = np.polyfit(S[t], V[t + 1] * df, 7)
+        C = np.polyval(reg, S[t])
+        V[t] = np.where(C > h[t], V[t + 1] * df, h[t])
+
+    # MCS estimator
+    C0 = df * np.mean(V[1])
+    return C0
+
+
+gbm_mcs_amer(110, option='call')
+gbm_mcs_amer(110, option='put')
+#+end_src
+
+The European value of an option represents a lower bound to the American option's value. The difference is generally called the /early exercise premium/.
+
+What follows compares European and American option values for the same range of strikes as before to estimate the early exercise premium, this time with puts.
+
+#+begin_src python
+euro_res, amer_res = [], []
+k_list = np.arange(80., 120.1, 5.)
+
+for K in k_list:
+    euro_res.append(gbm_mcs_dyna(K, 'put'))
+    amer_res.append(gbm_mcs_amer(K, 'put'))
+
+euro_res = np.array(euro_res)
+amer_res = np.array(amer_res)
+
+fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+ax1.plot(k_list, euro_res, 'b', label='European put')
+ax1.plot(k_list, amer_res, 'ro', label='American put')
+ax1.set_ylabel('call option value')
+ax1.legend(loc=0)
+wi=1.0
+ax2.bar(k_list - wi / 2, (amer_res - euro_res) / euro_res * 100, wi)
+ax2.set_xlabel('strike')
+ax2.set_ylabel('early exercise premium in %')
+ax2.set_xlim(left=75, right=125)
+plt.show()
+#+end_src
+
+* Risk Measures
+
+In addition to valuation, /risk management/ is another important application area of stochastic methods and simulation. This section illustrates the calculation/estimation of two of the most common risk measures applied today in the finance industry.
+
+** Value-at-Risk
+
+Value-at-Risk (VaR) is one of the most widely used risk measures. It is widely criticized on theoretical grounds with regard to its limited ability to capture /tail risk/. VaR is a number denoted in currency units indicating a loss (of a portfolio, a single position, etc) that is not exceeded with some confidence level (probability) over time.
+
+Consider a stock position worth 1 million USD today, that has a VaR of $50,000 USD at a confidence level of 99% over a time period of 30 days (one month). This VaR figure says that with a probability of 99%, the loss to be expected over a period of 30 days will /not exceed/ $50,000 USD.
+
+However, it does not say anything about the size of the loss once a loss beyond $50,000 USD occurs. All it says is that there is a 1% probability that a loss of a /minimum of $50,000 USD or higher/ will occur.
+
+Assume the Black-Scholes-Merton setup and consider the following parameterization and simulation of index levels at a future date T = 30/365 (a period of 30 days). The estimation of VaR figures requires the simulated absolute profits and losses relative to the value of the position today in a sorted manner, i.e., from the severest loss to the largest profit.
+
+#+begin_src python
+S0 = 100        # initial index
+r = 0.05        # risk-free rate
+sigma = 0.25    # constant volatility
+T = 30 / 365    # time period
+I = 10000       # time intervals
+
+# simulate end-of-period values for the geometric Brownian motion
+ST = S0 * np.exp((r - 0.5 * sigma ** 2) * T +
+                 sigma * np.sqrt(T) * npr.standard_normal(I))
+
+# calculate the absolute profits and losses per simulation run and sorts the values
+R_gbm = np.sort(ST - S0)
+
+# absolute profits and losses from the simulation
+plt.figure()
+plt.hist(R_gbm, bins=50)
+plt.xlabel('absolute return')
+plt.ylabel('frequency')
+plt.show()
+
+import scipy.stats as scs
+
+percs = [0.01, 0.1, 1., 2.5, 5.0, 10.0]
+var = scs.scoreatpercentile(R_gbm, percs)
+print('%16s %16s' % ('Confidence Level', 'Value-at-Risk'))
+print(33 * '-')
+for pair in zip(percs, var):
+    print('%16.2f %16.3f' % (100 - pair[0], -pair[1]))
+#+end_src
+
+
+Second example, jump diffusion simulated dynamically
+
+
+#+begin_src python
+dt = 30. / 365 / M
+rj = lamb * (math.exp(mu + 0.5 * delta ** 2) - 1)
+
+S = np.zeros((M + 1, I))
+S[0] = S0
+sn1 = npr.standard_normal((M + 1, I))
+sn2 = npr.standard_normal((M + 1, I))
+poi = npr.poisson(lamb * dt, (M + 1, I))
+
+for t in range(1, M + 1, 1):
+    S[t] = S[t - 1] * (np.exp((r - rj - 0.5 * sigma ** 2) * dt
+                              + sigma * math.sqrt(dt) * sn1[t])
+                              + (np.exp(mu + delta * sn2[t]) - 1)
+                              * poi[t])
+    S[t] = np.maximum(S[t], 0)
+
+R_jd = np.sort(S[-1] - S0)
+
+# Absolute profits and losses from simulation (jump diffusion)
+plt.figure()
+plt.hist(R_jd, bins=50)
+plt.xlabel('absolute return')
+plt.ylabel('frequency')
+plt.show()
+
+# VaR for Jump Diffusion is nearly equal for the 90% percentile
+# yet almost 4 times as much risk at the 0.01 percentile
+percs = [0.01, 0.1, 1., 2.5, 5.0, 10.0]
+var = scs.scoreatpercentile(R_jd, percs)
+print('%16s %16s' % ('Confidence Level', 'Value-at-Risk'))
+print(33 * '-')
+for pair in zip(percs, var):
+    print('%16.2f %16.3f' % (100 - pair[0], -pair[1]))
+#+end_src
+
+VaR measures for both cases compared graphically
+
+#+begin_src python
+percs = list(np.arange(0.0, 10.1, 0.1))
+gbm_var = scs.scoreatpercentile(R_gbm, percs)
+jd_var = scs.scoreatpercentile(R_jd, percs)
+
+# Value-at-Risk for Geometric Brownian motion and Jump Diffusion
+plt.figure()
+plt.plot(percs, gbm_var, 'b', lw=1.5, label='GBM')
+plt.plot(percs, jd_var, 'r', lw=1.5, label='JD')
+plt.legend(loc=4)
+plt.xlabel('100 - confidence level [%]')
+plt.ylabel('Value-at-Risk')
+plt.ylim(ymax=0.0)
+plt.show()
+#+end_src
+
+* Credit Valuation Adjustments
+
+Other important risk measures are the credit value-at-risk (CVaR) and the credit valuation adjustment (CVA), which is derived from the CVaR. Roughly speaking, CVaR is a measure for the risk resulting from the possibility that a counterparty might not be able to honor its obligations -- for example, if the counterparty goes bankrupt.
+
+In such a case, there are two main assumptions to be made: the /probability of default/ and the (average) /loss level/.
+
+Consider the benchmark setup of BSM with the parameterization below. In the simplest case, one considers a fixed (average) loss level L and a fixed probability p of default (per year) of a counterparty. Using the Poisson distribution, default scenarios are generated as follows, taking into account that a default can only occur once:
+
+#+begin_src python
+S0 = 100.
+r = 0.05
+sigma = 0.2
+T = 1.
+I = 100000
+
+ST = S0 * np.exp((r - 0.5 * sigma ** 2) * T
+                 + sigma * np.sqrt(T) * npr.standard_normal(I))
+
+L = 0.5     # the loss level
+p = 0.01    # the probability of default
+D = npr.poisson(p * T, I)  # simulates default events
+D = np.where(D > 1, 1, D)  # limits defaults to one such event
+#+end_src
+
+
+Without default, the risk-neutral value of the future index level should be equal to the
+current value of the asset today (up to differences resulting from numerical errors).
+The CVaR and the present value of the asset, adjusted for the credit risk, are given as follows
+
+
+#+begin_src python
+math.exp(-r * T) * np.mean(ST)   # discounted average simulated value of the asset
+CVaR = math.exp(-r * T) * np.mean(L * D * ST)
+CVaR  # CVaR as the discounted average of the future losses in the case of a default
+
+S0_CVA = math.exp(-r * T) * np.mean((1 - L * D) * ST)
+S0_CVA  # Discounted average simulated value of the asset at T, adjusted for the simulated losses from default
+
+S0_adj = S0 - CVaR
+S0_adj  # current price of the asset adjusted by the simulated CVaR
+
+np.count_nonzero(L * D * ST)
+
+# losses due to risk-neutrally expected default
+plt.figure()
+plt.hist(L * D * ST, bins=50)
+plt.xlabel('loss')
+plt.ylabel('frequency')
+plt.ylim(ymax=175)
+plt.show()
+#+end_src
+
+
+Consider the case of a European call option
+
+
+#+begin_src python
+K = 100.
+hT = np.maximum(ST - K, 0)
+
+C0 = math.exp(-r * T) * np.mean(hT)
+C0  # The monte carlo estimator value for the European call option
+
+CVaR = math.exp(-r * T) * np.mean(L * D * hT)
+CVaR  # The CVaR as the discounted average of the future losses in the case of a default
+
+C0_CVA = math.exp(-r * T) * np.mean((1 - L * D) * hT)
+C0_CVA  # The Monte Carlo estimator value for the European call option, adjusted for the simulated losses from default
+#+end_src
+
+
+Compared to the case of a regular asset, the option case has somewhat different characteristics
+One only sees a little more than 500 losses due to default, although there are again 1000 defaults in total
+This results from the fact that the payoff of the option at maturity has a high probability of being zero.
+
+
+#+begin_src python
+np.count_nonzero(L * D * hT)  # The number of losses due to default
+
+np.count_nonzero(D)  # The number of defaults
+
+I - np.count_nonzero(hT)  # The number of cases for which the option expires worthless
+
+# losses due to risk-neutrally expected default (call option)
+plt.figure()
+plt.hist(L * D * hT, bins=50)
+plt.xlabel('loss')
+plt.ylabel('frequency')
+plt.ylim(ymax=350)
+plt.show()
 #+end_src

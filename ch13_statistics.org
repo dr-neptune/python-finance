@@ -1,0 +1,21 @@
+#+TITLE: Chapter 13: Statistics
+
+This chapter has 4 focal points:
+
+- Normality Tests
+
+A large number of important financial models, like modern or mean-variance portfolio theory (MPT) and the capital asset pricing model (CAPM) rest on the assumption that returns of securities are normally distributed. This chapter presents approaches to testing a given time series for normality of returns
+
+- Portfolio Optimization
+
+Starting in the early 1950s with the work of pioneer Harry Markowitz, *Mean-Variance Portfolio Theory* began to replace people's reliance on judgement and experience with rigorous mathematical and statistical methods when it comes to the investment of money in financial markets.
+
+- Bayesian Statistics
+
+Bayesian statistics introduces the notion of beliefs of agents and the updating of beliefs to statistics.
+
+- Machine Learning
+
+This section looks at supervised learning for classification
+
+* Normality Tests
