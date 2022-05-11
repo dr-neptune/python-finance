@@ -265,3 +265,117 @@ plt.xlabel('expected volatility')
 plt.ylabel('expected return')
 plt.colorbar(label='Sharpe Ratio')
 plt.show()
+
+# Capital Market Line
+import scipy.interpolate as sci
+
+ind = np.argmin(tvols)  # index position of minimum volatility portfolio
+evols = tvols[ind:]     # relevant portfolio volatility
+erets = trets[ind:]     # relevant portfolio returns
+
+tck = sci.splrep(evols, erets)
+
+def f(x):
+    """Efficient frontier function (spline approximation)"""
+    return sci.splev(x, tck, der=0)
+
+def df(x):
+    """First derivative of efficient frontier function"""
+    return sci.splev(x, tck, der=1)
+
+def equations(p, rf=0.01):
+    # equations describing the capital market line
+    eq1 = rf - p[0]
+    eq2 = rf + p[1] * p[2] - f(p[2])
+    eq3 = p[1] - df(p[2])
+    return eq1, eq2, eq3
+
+opt = sco.fsolve(equations, [0.01, 0.5, 0.15])
+
+np.round(equations(opt), 6)
+
+# Capital market line and tangent portfolio (star) for risk-free rate of 1%
+plt.figure()
+plt.scatter(pvols, prets, c=(prets - 0.01)/pvols,
+            marker='.', cmap='coolwarm')
+plt.plot(evols, erets, 'b', lw=2.0)
+cx = np.linspace(0.0, 0.3)
+plt.plot(cx, opt[0] + opt[1] * cx, 'r', lw=1.5)
+plt.plot(opt[2], f(opt[2]), 'y*', markersize=15.0)
+plt.grid(True)
+plt.axhline(0, color='k', ls='--', lw=2.0)
+plt.axvline(0, color='k', ls='--', lw=2.0)
+plt.xlabel('expected volatility')
+plt.ylabel('expected return')
+plt.colorbar(label='Sharpe Ratio')
+plt.show()
+
+# get portfolio weights of the optimal (tangent) portfolio
+cons = ({'type': 'eq', 'fun': lambda x: port_ret(x) - f(opt[2])},
+        {'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+res = sco.minimize(port_vol, eweights, method='SLSQP', bounds=bnds, constraints=cons)
+
+res['x'].round(3)
+
+port_ret(res['x'])
+port_vol(res['x'])
+port_ret(res['x']) / port_vol(res['x'])
+
+# Bayesian Regression
+x = np.linspace(0, 10, 500)
+y = 4 + 2 * x + np.random.standard_normal(len(x)) * 2
+reg = np.polyfit(x, y, 1)
+
+# sample data points and a regression line
+plt.figure()
+plt.scatter(x, y, c=y, marker='v', cmap='coolwarm')
+plt.plot(x, reg[1] + reg[0] * x, lw=2.0)
+plt.colorbar()
+plt.xlabel('x')
+plt.ylabel('y')
+plt.show()
+
+import pymc3 as pm
+
+with pm.Model() as model:
+    # model
+    # define priors
+    alpha = pm.Normal('alpha', mu=0, sd=20)
+    beta = pm.Normal('beta', mu=0, sd=20)
+    sigma = pm.Uniform('sigma', lower=0, upper=10)
+    # define model specification (linear regression)
+    y_est = alpha + beta * x
+    # define likelihood
+    likelihood = pm.Normal('y', mu=y_est, sd=sigma, observed=y)
+    # inference
+    # find starting value by optimization
+    start = pm.find_MAP()
+    # instantiate the MCMC algorithm
+    step = pm.NUTS()
+    # draw posterior samples using NUTS
+    trace = pm.sample(100, tune=1000, start=start, progressbar=True)
+
+# show summary statistics from samplings
+pm.summary(trace)
+# estimates from the first sample
+trace[0]
+
+# trace plot
+pm.traceplot(trace, lines={'alpha': 4, 'beta': 2, 'sigma': 2})
+plt.show()
+
+# regression lines based on different estimates
+plt.figure()
+plt.scatter(x, y, c=y, marker='v', cmap='coolwarm')
+plt.colorbar()
+plt.xlabel('x')
+plt.ylabel('y')
+for i in range(len(trace)):
+    plt.plot(x, trace['alpha'][i] + trace['beta'][i] * x)
+
+# Two Financial Instruments
+data = raw[['GDX', 'GLD']].dropna()
+data = data / data.iloc[0]
+# normalized prices for GLD and GDX over time
+data.plot()
+plt.show()

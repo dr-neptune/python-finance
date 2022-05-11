@@ -403,4 +403,154 @@ Taking into account such a riskless asset enhances the efficient investment oppo
 
 By adjusting the proportion of the investor's wealth to be invested in the riskless asset, it is possible to achieve any risk-return profile that lies on the straight line (in the risk-return space) between the riskless asset and the efficient portfolio.
 
-The optimal portfolio is the one where the tangent line of the efficient frontier goes exactly through the risk-return point of the riskless portfolio.
+The optimal portfolio is the one where the tangent line of the efficient frontier goes exactly through the risk-return point of the riskless portfolio. For example, consider a riskless interest rate of $r_f = 0.01$. The portfolio is to be found on the efficient frontier for which the tangent goes through the point $(\sigma_f, r_f) = (0, 0.01)$ in risk-return space.
+
+#+begin_src python
+import scipy.interpolate as sci
+
+ind = np.argmin(tvols)  # index position of minimum volatility portfolio
+evols = tvols[ind:]     # relevant portfolio volatility
+erets = trets[ind:]     # relevant portfolio returns
+
+tck = sci.splrep(evols, erets)
+
+def f(x):
+    """Efficient frontier function (spline approximation)"""
+    return sci.splev(x, tck, der=0)
+
+def df(x):
+    """First derivative of efficient frontier function"""
+    return sci.splev(x, tck, der=1)
+
+def equations(p, rf=0.01):
+    # equations describing the capital market line
+    eq1 = rf - p[0]
+    eq2 = rf + p[1] * p[2] - f(p[2])
+    eq3 = p[1] - df(p[2])
+    return eq1, eq2, eq3
+
+opt = sco.fsolve(equations, [0.01, 0.5, 0.15])
+
+np.round(equations(opt), 6)
+
+# Capital market line and tangent portfolio (star) for risk-free rate of 1%
+plt.figure()
+plt.scatter(pvols, prets, c=(prets - 0.01)/pvols,
+            marker='.', cmap='coolwarm')
+plt.plot(evols, erets, 'b', lw=2.0)
+cx = np.linspace(0.0, 0.3)
+plt.plot(cx, opt[0] + opt[1] * cx, 'r', lw=1.5)
+plt.plot(opt[2], f(opt[2]), 'y*', markersize=15.0)
+plt.grid(True)
+plt.axhline(0, color='k', ls='--', lw=2.0)
+plt.axvline(0, color='k', ls='--', lw=2.0)
+plt.xlabel('expected volatility')
+plt.ylabel('expected return')
+plt.colorbar(label='Sharpe Ratio')
+plt.show()
+
+# get portfolio weights of the optimal (tangent) portfolio
+cons = ({'type': 'eq', 'fun': lambda x: port_ret(x) - f(opt[2])},
+        {'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+res = sco.minimize(port_vol, eweights, method='SLSQP', bounds=bnds, constraints=cons)
+
+res['x'].round(3)
+
+port_ret(res['x'])
+port_vol(res['x'])
+port_ret(res['x']) / port_vol(res['x'])
+#+end_src
+
+* Bayesian Statistics
+
+** Bayes' Formula
+
+The most common interpretation of Bayes' formula in finance is the /diachronic interpretation/. This mainly states that over time one learns new information about certain variables or parameters of interest, like the mean return of a time series.
+
+Bayes' Formula
+$P(H | D) = \frac{p(H) p(D | H)}{p(D)}$
+
+Here, $H$ stands for an event, the hypothesis, and $D$ represents the data an experiment or the real world might present.
+
+On the basis of these notions, we have:
+
+- $p(H)$ : the prior probability
+- $p(D)$ : the probability for the data under any hypothesis, called the /normalizing constant/
+- $p(D | H)$ : the /likelihood/ (i.e., the probability) of the data under hypothesis $H$
+- $p(H | D)$ : the posterior probability; i.e., after one has seen the data
+
+
+** Bayesian Regression
+
+With PyMC3 the python ecosystem provides a comprehensive package to technically implement Bayesian statistics and probabilistic programming.
+
+Consider the following example based on noisy data around a straight line.
+
+First, an ordinary least squares regression:
+
+#+begin_src python
+x = np.linspace(0, 10, 500)
+y = 4 + 2 * x + np.random.standard_normal(len(x)) * 2
+reg = np.polyfit(x, y, 1)
+
+# sample data points and a regression line
+plt.figure()
+plt.scatter(x, y, c=y, marker='v', cmap='coolwarm')
+plt.plot(x, reg[1] + reg[0] * x, lw=2.0)
+plt.colorbar()
+plt.xlabel('x')
+plt.ylabel('y')
+plt.show()
+#+end_src
+
+And another using PyMC3 for Bayesian Regression
+
+$\hat{y}(x) = \alpha + \beta \cdot x$
+$\alpha \sim \mathcal{N}(0, 20)$
+$\beta \sim \mathcal{N}(0, 10)$
+
+- find_MAP() finds the starting point for the sampling algorithm by deriving the /local maximum a posteriori point/.
+- NUTS() implements the so-called "efficient No-U-Turn Sampler with dual averaging" (NUTS) algorithm for MCMC sampling given assumed priors
+- sample() draws a number of samples given the starting value from find_MAP() and the optimal step size from the NUTS algorithm
+
+#+begin_src python
+import pymc3 as pm
+
+with pm.Model() as model:
+    # model
+    # define priors
+    alpha = pm.Normal('alpha', mu=0, sd=20)
+    beta = pm.Normal('beta', mu=0, sd=20)
+    sigma = pm.Uniform('sigma', lower=0, upper=10)
+    # define model specification (linear regression)
+    y_est = alpha + beta * x
+    # define likelihood
+    likelihood = pm.Normal('y', mu=y_est, sd=sigma, observed=y)
+    # inference
+    # find starting value by optimization
+    start = pm.find_MAP()
+    # instantiate the MCMC algorithm
+    step = pm.NUTS()
+    # draw posterior samples using NUTS
+    trace = pm.sample(100, tune=1000, start=start, progressbar=True)
+
+# show summary statistics from samplings
+pm.summary(trace)
+# estimates from the first sample
+trace[0]
+
+# trace plot
+pm.traceplot(trace, lines={'alpha': 4, 'beta': 2, 'sigma': 2})
+plt.show()
+
+# regression lines based on different estimates
+plt.figure()
+plt.scatter(x, y, c=y, marker='v', cmap='coolwarm')
+plt.colorbar()
+plt.xlabel('x')
+plt.ylabel('y')
+for i in range(len(trace)):
+    plt.plot(x, trace['alpha'][i] + trace['beta'][i] * x)
+#+end_src
+
+** Two Financial Instruments
