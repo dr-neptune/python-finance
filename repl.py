@@ -152,3 +152,17 @@ for sym in symbols:
     print_statistics(log_data)
     print('\nNormality Tests\n')
     normality_tests(log_data)
+
+# Portfolio Optimization
+noa = len(symbols)  # number of assets
+
+rets = np.log(data / data.shift(1))
+rets.hist(bins=40)
+plt.show()
+
+rets.mean() * 252  # annualized mean returns
+rets.cov() * 252   # annualized covariance matrix
+
+# The Basic Theory
+weights = np.random.random(noa)
+weights /= np.sum(weights)

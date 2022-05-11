@@ -221,3 +221,40 @@ for sym in symbols:
 #+end_src
 
 * Portfolio Optimization
+
+** The Data
+
+The basic idea of MPT is to make use of /diversification/ to achieve a minimal portfolio risk given a target return level or a maximum portfolio return given a certain level of risk. One would expect such diversification effects for the right combination of a larger number of assets and a certain diversity in the assets.
+
+#+begin_src python
+noa = len(symbols)  # number of assets
+
+rets = np.log(data / data.shift(1))
+rets.hist(bins=40)
+plt.show()
+#+end_src
+
+The /covariance matrix/ for the financial instruments to be invested in is the central piece of the portfolio selection process.
+
+#+begin_src python
+rets.mean() * 252  # annualized mean returns
+rets.cov() * 252   # annualized covariance matrix
+#+end_src
+
+** The Basic Theory
+
+In what follows, it is assumed that an investor is not allowed to set up short positions in a financial instrument. Only long positions are allowed, which implies that 100% of the investor's wealth has to be divided among the available instruments in such a way that all positions are long (positive) and that the positions add up to 100%.
+
+#+begin_src python
+# gen 4 uniformly distributed random nums and normalize s.t. sum(rvs) = 1
+weights = np.random.random(noa)
+weights /= np.sum(weights)
+#+end_src
+
+General formula for expected portfolio return
+
+$\mu_p = E(\Sigma_I w_i r_i) = w^T \mu$
+
+#+begin_src python
+np.sum(rets.mean() * weights) * 252  # annualized portfolio return given the portfolio weights
+#+end_src
