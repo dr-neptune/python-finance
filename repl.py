@@ -166,3 +166,102 @@ rets.cov() * 252   # annualized covariance matrix
 # The Basic Theory
 weights = np.random.random(noa)
 weights /= np.sum(weights)
+
+def port_ret(weights):
+    return np.sum(rets.mean() * weights) * 252
+
+def port_vol(weights):
+    return np.sqrt(np.dot(weights.T, np.dot(rets.cov() * 252, weights)))
+
+# monte carlo simulation of portfolio weights
+prets, pvols = [], []
+for p in range(2500):
+    weights = np.random.random(noa)
+    weights /= np.sum(weights)
+    prets.append(port_ret(weights))
+    pvols.append(port_vol(weights))
+prets = np.array(prets)
+pvols = np.array(pvols)
+
+# expected return and volatility for random portfolio weights
+plt.figure()
+plt.scatter(pvols, prets, c=prets / pvols,
+            marker='o', cmap='coolwarm')
+plt.xlabel('expected volatility')
+plt.ylabel('expected return')
+plt.colorbar(label='Sharpe ratio')
+plt.show()
+
+# optimal portfolios
+import scipy.optimize as sco
+
+def min_func_sharpe(weights):
+    # function to be minimized
+    return -port_ret(weights) / port_vol(weights)
+
+cons = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})  # equality constraint
+bnds = tuple((0, 1) for x in range(noa))  # bounds for the parameters
+eweights = np.array(noa * [1. / noa,])  # equal weights vector
+
+opts = sco.minimize(min_func_sharpe,
+                    eweights,
+                    method='SLSQP',
+                    bounds=bnds,
+                    constraints=cons)
+
+# maximize Sharpe ratio
+optimals = opts['x'].round(3)  # optimal portfolio weights
+port_ret(optimals)  # resulting portfolio return
+port_vol(optimals)  # resulting portfolio volatility
+port_ret(optimals) / port_vol(optimals)  # maximum Sharpe ratio
+
+# minimize variance
+optv = sco.minimize(port_vol,
+                    eweights,
+                    method='SLSQP',
+                    bounds=bnds,
+                    constraints=cons)
+
+optimals = optv['x'].round(3)  # optimal portfolio weights
+port_ret(optimals)  # resulting portfolio return
+port_vol(optimals)  # resulting portfolio volatility
+port_ret(optimals) / port_vol(optimals)  # maximum Sharpe ratio
+
+# Efficient Frontier
+
+trets = np.linspace(0.05, 0.2, 50)
+
+# the two binding constraints for the efficient frontier
+cons = ({'type': 'eq', 'fun': lambda x: port_ret(x) - tret},
+        {'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+
+bnds = tuple((0, 1) for x in weights)
+
+tvols = []
+for tret in trets:
+    # minimization of portfolio volatility for different target returns
+    res = sco.minimize(port_vol,
+                       eweights,
+                       method='SLSQP',
+                       bounds=bnds,
+                       constraints=cons)
+    tvols.append(res['fun'])
+tvols = np.array(tvols)
+
+# minimum risk portfolios for given return levels (efficient frontier)
+plt.figure()
+plt.scatter(pvols, prets, c=prets/pvols,
+            marker='.', alpha=0.8, cmap='coolwarm')
+plt.plot(tvols, trets, 'b', lw=2.0)
+plt.plot(port_vol(opts['x']),
+         port_ret(opts['x']),
+         'y*',
+         markersize=15.0)
+plt.plot(port_vol(optv['x']),
+         port_ret(optv['x']),
+         'r*',
+         markersize=15.0)
+plt.xlabel('expected volatility')
+plt.ylabel('expected return')
+plt.colorbar(label='Sharpe Ratio')
+plt.show()

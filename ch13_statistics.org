@@ -258,3 +258,149 @@ $\mu_p = E(\Sigma_I w_i r_i) = w^T \mu$
 #+begin_src python
 np.sum(rets.mean() * weights) * 252  # annualized portfolio return given the portfolio weights
 #+end_src
+
+The second object of importance in MPT is the /expected portfolio variance/.
+
+General formula for expected portfolio variance
+$\sigma_p^2 = E((r - \mu)^2) = w^T \Sigma w$
+
+#+begin_src python
+portfolio_cov = np.dot(weights.T, np.dot(rets.cov() * 252, weights))
+volatility = math.sqrt(portfolio_cov)
+#+end_src
+
+Of paramount interest to investors is what risk-return profiles are possible for a given set of financial instruments, and their statistical characteristics.
+
+The following implements a Monte Carlo simulation to generate random portfolio weight vectors on a larger scale. For every simulated allocation, the code records the resulting expected portfolio return and variance.
+
+#+begin_src python
+def port_ret(weights):
+    return np.sum(rets.mean() * weights) * 252
+
+def port_vol(weights):
+    return np.sqrt(np.dot(weights.T, np.dot(rets.cov() * 252, weights)))
+
+# monte carlo simulation of portfolio weights
+prets, pvols = [], []
+for p in range(2500):
+    weights = np.random.random(noa)
+    weights /= np.sum(weights)
+    prets.append(port_ret(weights))
+    pvols.append(port_vol(weights))
+prets = np.array(prets)
+pvols = np.array(pvols)
+
+# expected return and volatility for random portfolio weights
+plt.figure()
+plt.scatter(pvols, prets, c=prets / pvols,
+            marker='o', cmap='coolwarm')
+plt.xlabel('expected volatility')
+plt.ylabel('expected return')
+plt.colorbar(label='Sharpe ratio')
+plt.show()
+#+end_src
+
+The plot above illustrates the results of the Monte Carlo simulation. It also provides results for the *Sharpe ratio*, defined as:
+
+$SR \equiv \frac{\mu_p - r_f}{\sigma_p}$
+
+i.e., the expected excess return of the portfolio over the risk-free short rate divided by the expected standard deviation of the portfolio.
+For simplicity, in this casae $r_f \equiv 0$ is assumed.
+
+As an investor, one is generally interested in the maximum return given a fixed risk level or the minimum risk given a fixed return expectation.
+This set of portfolios then makes up the /efficient frontier/.
+
+** Optimal Portfolios
+
+This /minimization/ function is quite general and allows for equality constraints, inequality constrants, and numerical bounds for the parameters.
+
+First, the /maximization of the Sharpe ratio/. Formally, the negative value of the Sharpe ratio is minimized to derive at the maximum value and the optimal portfolio composition. The constraint is that all the weights add up to 1.
+
+#+begin_src python
+import scipy.optimize as sco
+
+def min_func_sharpe(weights):
+    # function to be minimized
+    return -port_ret(weights) / port_vol(weights)
+
+cons = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})  # equality constraint
+bnds = tuple((0, 1) for x in range(noa))  # bounds for the parameters
+eweights = np.array(noa * [1. / noa,])  # equal weights vector
+
+opts = sco.minimize(min_func_sharpe,
+                    eweights,
+                    method='SLSQP',
+                    bounds=bnds,
+                    constraints=cons)
+
+# maximize Sharpe ratio
+optimals = opts['x'].round(3)  # optimal portfolio weights
+port_ret(optimals)  # resulting portfolio return
+port_vol(optimals)  # resulting portfolio volatility
+port_ret(optimals) / port_vol(optimals)  # maximum Sharpe ratio
+
+# minimize variance
+optv = sco.minimize(port_vol,
+                    eweights,
+                    method='SLSQP',
+                    bounds=bnds,
+                    constraints=cons)
+
+optimals = optv['x'].round(3)  # optimal portfolio weights
+port_ret(optimals)  # resulting portfolio return
+port_vol(optimals)  # resulting portfolio volatility
+port_ret(optimals) / port_vol(optimals)  # maximum Sharpe ratio
+#+end_src
+
+** Efficient Frontier
+
+The derivation of all optimal portfolios, i.e., all portfolios with minimum volatility for a given target return level (or all portfolios with maximum return for a given risk level) is similar to the previous optimizations. The only difference is that one has to iterate over multiple starting conditions.
+
+#+begin_src python
+trets = np.linspace(0.05, 0.2, 50)
+
+# the two binding constraints for the efficient frontier
+cons = ({'type': 'eq', 'fun': lambda x: port_ret(x) - tret},
+        {'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+
+bnds = tuple((0, 1) for x in weights)
+
+tvols = []
+for tret in trets:
+    # minimization of portfolio volatility for different target returns
+    res = sco.minimize(port_vol,
+                       eweights,
+                       method='SLSQP',
+                       bounds=bnds,
+                       constraints=cons)
+    tvols.append(res['fun'])
+tvols = np.array(tvols)
+
+# minimum risk portfolios for given return levels (efficient frontier)
+plt.figure()
+plt.scatter(pvols, prets, c=prets/pvols,
+            marker='.', alpha=0.8, cmap='coolwarm')
+plt.plot(tvols, trets, 'b', lw=2.0)
+plt.plot(port_vol(opts['x']),
+         port_ret(opts['x']),
+         'y*',
+         markersize=15.0)
+plt.plot(port_vol(optv['x']),
+         port_ret(optv['x']),
+         'r*',
+         markersize=15.0)
+plt.xlabel('expected volatility')
+plt.ylabel('expected return')
+plt.colorbar(label='Sharpe Ratio')
+plt.show()
+#+end_src
+
+** Capital Market Line
+
+In additional to financial instruments like stocks or commodities, there is a general, universal investment opportunity: cash or cash accounts.
+
+Taking into account such a riskless asset enhances the efficient investment opportunity set for investors considerably. The basic idea is that investors first determine an efficient portfolio of risky assets and then add the riskless asset to the mix.
+
+By adjusting the proportion of the investor's wealth to be invested in the riskless asset, it is possible to achieve any risk-return profile that lies on the straight line (in the risk-return space) between the riskless asset and the efficient portfolio.
+
+The optimal portfolio is the one where the tangent line of the efficient frontier goes exactly through the risk-return point of the riskless portfolio.
