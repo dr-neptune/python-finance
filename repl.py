@@ -372,6 +372,7 @@ plt.xlabel('x')
 plt.ylabel('y')
 for i in range(len(trace)):
     plt.plot(x, trace['alpha'][i] + trace['beta'][i] * x)
+plt.show()
 
 # Two Financial Instruments
 data = raw[['GDX', 'GLD']].dropna()
@@ -379,3 +380,257 @@ data = data / data.iloc[0]
 # normalized prices for GLD and GDX over time
 data.plot()
 plt.show()
+
+# scatter plot of GLD prices against GDX prices
+mpl_dates = matplotlib.dates.date2num(data.index.to_pydatetime())
+plt.figure()
+plt.scatter(data['GDX'], data['GLD'], c=mpl_dates, marker='o', cmap='coolwarm')
+plt.xlabel('GDX')
+plt.ylabel('GLD')
+plt.colorbar(ticks=matplotlib.dates.DayLocator(interval=250),
+             format=matplotlib.dates.DateFormatter('%d %b %y'))
+plt.show()
+
+# implement a Bayesian regression on the basis of these two time series
+with pm.Model() as model:
+    alpha = pm.Normal('alpha', mu=0, sd=20)
+    beta = pm.Normal('beta', mu=0, sd=20)
+    sigma = pm.Uniform('sigma', lower=0, upper=50)
+    y_est = alpha + beta * data['GDX'].values
+    likelihood = pm.Normal('GLD', mu=y_est, sd=sigma, observed=data['GLD'].values)
+    start = pm.find_MAP()
+    step = pm.NUTS()
+    trace = pm.sample(250, tune=2000, start=start, progressbar=True)
+
+
+pm.summary(trace)
+fig = pm.traceplot(trace)
+plt.show()
+
+# multiple Bayesian regression lines through GDX and GLD data
+plt.figure()
+plt.scatter(data['GDX'], data['GLD'], c=mpl_dates, marker='o', cmap='coolwarm')
+plt.xlabel('GDX')
+plt.ylabel('GLD')
+for i in range(len(trace)):
+    plt.plot(data['GDX'], trace['alpha'][i] + trace['beta'][i] * data['GDX'])
+plt.colorbar(ticks=matplotlib.dates.DayLocator(interval=250),
+             format=matplotlib.dates.DateFormatter('%d %b %y'))
+plt.show()
+
+# Updating Estimates over Time
+from pymc3.distributions.timeseries import GaussianRandomWalk
+
+subsample_alpha, subsample_beta = 50, 50
+
+model_randomwalk = pm.Model()
+with model_randomwalk:
+    # define priors for the random walk parameters
+    sigma_alpha = pm.Exponential('sig_alpha', 1. / .02, testval=.1)
+    sigma_beta = pm.Exponential('sig_beta', 1. / .02, testval=.1)
+    # models for the random walks
+    alpha = GaussianRandomWalk('alpha', sigma_alpha ** -2,
+                               shape=int(len(data) / subsample_alpha))
+    beta = GaussianRandomWalk('beta', sigma_beta ** -2,
+                               shape=int(len(data) / subsample_beta))
+    # brings the parameter vectors to interval length
+    alpha_r = np.repeat(alpha, subsample_alpha)
+    beta_r = np.repeat(beta, subsample_beta)
+    # defines the regression model
+    regression = alpha_r + beta_r * data['GDX'][:1950].values[:2100]
+    # the prior for the standard deviation
+    sd = pm.Uniform('sd', 0, 20)
+    # defines the likelihood with mu from regression results
+    likelihood = pm.Normal('GLD', mu=regression, sd=sd, observed=data['GLD'][:1950].values[:2100])
+
+
+with model_randomwalk:
+    start = pm.find_MAP(vars=[alpha, beta])
+    step = pm.NUTS(scaling=start)
+    trace_rw = pm.sample(250, tune=1000, start=start, progressbar=True)
+
+pm.summary(trace_rw).head()  # the summary statistics per interval
+
+sh = np.shape(trace_rw['alpha'])
+sh  # shape of the object with parameter estimates
+
+# creates a list of dates to match the number of intervals
+part_dates = np.linspace(min(mpl_dates), max(mpl_dates), sh[1])
+
+from datetime import datetime
+
+index = [datetime.fromordinal(int(date)) for date in part_dates]
+
+# collects the relevant parameter time series in two DataFrame objects
+alpha = {'alpha_%i' % i: v for i, v in enumerate(trace_rw['alpha']) if i < 20}
+
+beta = {'beta_%i' % i: v for i, v in enumerate(trace_rw['beta']) if i < 20}
+
+df_alpha = pd.DataFrame(alpha, index=index)
+df_beta = pd.DataFrame(beta, index=index)
+
+ax = df_alpha.plot(color='b', style='-.', legend=False, lw=0.7)
+df_beta.plot(color='r', style='-.', legend=False, lw=0.5, ax=ax)
+plt.ylabel('alpha/beta')
+plt.show()
+
+# scatter plot with time-dependent regression lines (updated estimates)
+plt.figure()
+plt.scatter(data['GDX'], data['GLD'], c=mpl_dates, marker='o', cmap='coolwarm')
+plt.colorbar(ticks=matplotlib.dates.DayLocator(interval=250),
+             format=matplotlib.dates.DateFormatter('%d %b %y'))
+plt.xlabel('GDX')
+plt.ylabel('GLD')
+x = np.linspace(min(data['GDX']), max(data['GDX']))
+for i in range(sh[1]):
+    alpha_rw = np.mean(trace_rw['alpha'].T[i])
+    beta_rw = np.mean(trace_rw['beta'].T[i])
+    plt.plot(x, alpha_rw + beta_rw * x, '--', lw=0.7, color=plt.cm.coolwarm(i / sh[1]))
+plt.show()
+
+
+# Machine Learning
+from sklearn.datasets import make_blobs
+import matplotlib.pyplot as plt
+
+X, y = make_blobs(n_samples=250, centers=4, random_state=500, cluster_std=1.25)
+
+# sample data for the application of clustering algorithms
+plt.figure()
+plt.scatter(X[:, 0], X[:, 1], s=50)
+plt.show()
+
+# k-means clustering
+from sklearn.cluster import KMeans
+
+model = KMeans(n_clusters=4, random_state=0)
+model.fit(X)
+
+y_kmeans = model.predict(X)
+
+plt.figure()
+plt.scatter(X[:, 0], X[:, 1], c=y_kmeans, cmap='coolwarm')
+plt.show()
+
+# Gaussian mixture
+from sklearn.mixture import GaussianMixture
+
+model = GaussianMixture(n_components=4, random_state=0)
+model.fit(X)
+
+y_gm = model.predict(X)
+(y_gm == y_kmeans).all()
+
+plt.figure()
+plt.scatter(X[:, 0], X[:, 1], c=y_gm, cmap='coolwarm')
+plt.show()
+
+# Supervised Learning
+from sklearn.datasets import make_classification
+
+n_samples = 100
+
+X, y = make_classification(n_samples=n_samples,
+                           n_features=2,
+                           n_informative=2,
+                           n_redundant=0,
+                           n_repeated=0,
+                           random_state=250)
+
+plt.figure()
+plt.hist(X)
+plt.show()
+plt.figure()
+plt.scatter(x=X[:, 0], y=X[:, 1], c=y, cmap='coolwarm')
+plt.show()
+
+# Gaussian Naive Bayes
+from sklearn.naive_bayes import GaussianNB
+from sklearn.metrics import accuracy_score
+
+model = GaussianNB()
+model.fit(X, y)
+
+model.predict_proba(X).round(4)[:5]
+
+pred = model.predict(X)
+
+accuracy_score(y, pred)
+
+Xc = X[y == pred]
+Xf = X[y != pred]
+plt.figure()
+# correct predictions
+plt.scatter(x=Xc[:, 0], y=Xc[:, 1], c=y[y == pred], marker='o', cmap='coolwarm')
+# false predictions
+plt.scatter(x=Xf[:, 0], y=Xf[:, 1], c=y[y != pred], marker='x', cmap='coolwarm')
+plt.show()
+
+# Logistic Regression
+from sklearn.linear_model import LogisticRegression
+
+model = LogisticRegression(C=1, solver='lbfgs')
+model.fit(X, y)
+
+model.predict_proba(X).round(4)[:5]
+
+pred = model.predict(X)
+
+accuracy_score(y, pred)
+
+Xc = X[y == pred]
+Xf = X[y != pred]
+plt.figure()
+# correct predictions
+plt.scatter(x=Xc[:, 0], y=Xc[:, 1], c=y[y == pred], marker='o', cmap='coolwarm')
+# false predictions
+plt.scatter(x=Xf[:, 0], y=Xf[:, 1], c=y[y != pred], marker='x', cmap='coolwarm')
+plt.show()
+
+# Decision Trees
+from sklearn.tree import DecisionTreeClassifier
+
+model = DecisionTreeClassifier(max_depth=1)
+model.fit(X, y)
+
+pred = model.predict(X)
+accuracy_score(y, pred)
+
+
+print('{:>8s} | {:8s}'.format('depth', 'accuracy'))
+print(20 * '-')
+for depth in range(1, 7):
+    model = DecisionTreeClassifier(max_depth=depth)
+    model.fit(X, y)
+    acc = accuracy_score(y, model.predict(X))
+    print('{:8d} | {:8.2f}'.format(depth, acc))
+
+# deep neural networks
+
+# DNN with scikit-learn
+from sklearn.neural_network import MLPClassifier
+
+model = MLPClassifier(solver='lbfgs', alpha=1e-5, hidden_layer_sizes=2 * [75], random_state=10)
+model.fit(X, y)
+pred = model.predict(X)
+accuracy_score(y, pred)
+
+# DNNs with TensorFlow
+import tensorflow as tf
+
+fc = [tf.contrib.layers.real_valued_column('features')]
+model = tf.contrib.learn.DNNClassifier(hidden_units=5 * [250],
+                                       n_classes=2,
+                                       feature_columns=fc)
+
+def input_fn():
+    fc = {'features': tf.constant(X)}
+    la = tf.constant(y)
+    return fc, la
+
+model.fit(input_fn=input_fn, steps=100)
+model.evaluate(input_fn, steps=1)
+
+
+model.fit(input_fn=input_fn, steps=750)
+model.evaluate(input_fn, steps=1)
