@@ -1,0 +1,155 @@
+#+TITLE: Chapter 14: The FXCM Trading Platform
+
+The focus on the FXCM platform is on currency pairs as well as contracts for difference (CFDs) on major stock indices and commodities.
+
+This chapter covers the basic functionalities of the FXCM trading API
+
+* Getting Started
+
+#+begin_src python
+import fxcmpy
+
+api = fxcmpy.fxcmpy(config_file='fxcm.cfg', server='demo')
+#+end_src
+
+* Retrieving Data
+
+#+begin_src python
+import time
+import numpy as np
+import pandas as pd
+import datetime as dt
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('tkAgg')
+#+end_src
+
+** Retrieving Tick Data
+
+#+begin_src python
+from fxcmpy import fxcmpy_tick_data_reader as tdr
+
+print(tdr.get_available_symbols())
+
+start = dt.datetime(2018, 6, 25)
+stop = dt.datetime(2018, 6, 30)
+
+td = tdr('EURUSD', start, stop)
+
+df = td.get_raw_data()
+
+df.head()
+
+# get a subset of tick data
+sub = df.loc[(df.index >= '06/29/2018 12:00:00') & (df.index <= '06/29/2018 12:15:00')]
+
+# calculate mid prices from bid and ask
+sub['Mid'] = sub.mean(axis=1)
+# derive simple moving average values over intervals of 1000 ticks
+sub['SMA'] = sub['Mid'].rolling(1000).mean()
+sub[['Mid', 'SMA']].plot(lw=0.75)
+plt.show()
+#+end_src
+
+** Retrieving Candles Data
+
+#+begin_src python
+from fxcmpy import fxcmpy_candles_data_reader as cdr
+
+cdr.get_available_symbols()
+
+start = dt.datetime(2018, 5, 1)
+stop = dt.datetime(2018, 6, 30)
+period = 'H1'
+candles = cdr('EURUSD', start, stop, period)
+
+data = candles.get_data()
+
+data['MidClose'] = data[['BidClose', 'AskClose']].mean(axis=1)
+data['SMA1'] = data['MidClose'].rolling(30).mean()
+data['SMA2'] = data['MidClose'].rolling(100).mean()
+data[['MidClose', 'SMA1', 'SMA2']].plot()
+plt.show()
+#+end_src
+
+* Working with the API
+
+#+begin_src python
+instruments = api.get_instruments()
+#+end_src
+
+** Retrieving Historical Data
+
+#+begin_src python
+# get the 10 most recent end-of-day prices
+candles = api.get_candles('USD/JPY', period='D1', number=10)
+candles
+
+# retrieve end of day prices for a whole year
+start = dt.datetime(2017, 1, 1)
+end = dt.datetime(2018, 1, 1)
+
+candles = api.get_candles('EUR/GBP', period='D1', start=start, end=end)
+
+# retrieve the most recent one-minute bar prices available
+candles = api.get_candles('EUR/USD', period='m1', number=250)
+candles['askclose'].plot()
+plt.show()
+#+end_src
+
+** Retrieving Streaming Data
+
+#+begin_src python
+def output(data, dataframe):
+    print('%3d | %s | %s | %6.5f, %6.5f'
+          % (len(dataframe), data['Symbol'],
+             pd.to_datetime(int(data['Updated']), unit='ms'),
+             data['Rates'][0], data['Rates'][1]))
+
+api.subscribe_market_data('EUR/USD', (output,))
+
+api.get_last_price('EUR/USD')
+
+api.unsubscribe_market_data('EUR/USD')
+#+end_src
+
+** Placing Orders
+
+The FXCM API allows the placement and management of all types of orders that are also available via the trading application of FXCM (such as entry orders or trailing stop loss orders).
+
+The following code illustrates basic market buy and sell orders only since they are in general sufficient to at least get started with algorithmic trading. It first verifies that there are no open positions, then opens different positions (via the create_market_buy_order()) method
+
+#+begin_src python
+api.get_open_positions()
+
+# open a position of 10 in the EUR/USD currency pair
+order = api.create_market_buy_order('EUR/USD', 10)
+
+sel = ['tradeId', 'amountK', 'currency', 'grossPL', 'isBuy']
+
+# show open positions for selected elements
+api.get_open_positions()[sel]
+
+# open another position for 5 in the EUR/GBP currency pair
+order = api.create_market_buy_order('EUR/GBP', 5)
+#+end_src
+
+While the create_market_buy_order() function opens or increases positions, the create_market_sell_order() function allows one to close or decrease positions.
+
+#+begin_src python
+# open another position for 5 in the EUR/GBP currency pair
+order = api.create_market_buy_order('EUR/GBP', 5)
+order = api.create_market_sell_order('EUR/USD', 3)
+order = api.create_market_buy_order('EUR/GBP', 3)
+
+api.close_all_for_symbol('EUR/GBP')
+
+api.close_all()
+#+end_src
+
+** Account Information
+
+#+begin_src python
+api.get_default_account()
+api.get_accounts().T
+#+end_src
