@@ -1,0 +1,82 @@
+#+TITLE: Chapter 15: Trading Strategies
+
+This chapter is about the vectorized backtesting of algorithmic strategies. The term /algorithmic trading strategy/ is used to describe any financial trading strategy that is based on an algorithm designed to take long, short, or neutral positions in financial instruments on its own without human interference.
+
+This chapter does not provide an overview of algorithmic trading strategies. It rather focuses on the technical aspects of the vectorized backtesting approach for a select few strategies.
+
+Another focus of this chapter is the application of machine and deep learning algorithms to formulate algorithmic trading strategies.
+
+This chapter is broken down into the following sections:
+- simple moving averages
+- random walk hypothesis
+- linear OLS regression
+- clustering
+- frequency approach
+- classification
+- deep neural networks
+
+* Simple Moving Averages
+
+#+begin_src python
+# data import
+raw = pd.read_csv('data/tr_eikon_eod_data.csv')
+symbol = 'AAPL.O'
+
+data = raw[symbol].dropna().to_frame()
+
+# trading strategy
+SMA1 = 42
+SMA2 = 252
+
+data['SMA1'] = data[symbol].rolling(SMA1).mean()
+data['SMA2'] = data[symbol].rolling(SMA2).mean()
+
+data.plot()
+plt.show()
+#+end_src
+
+The trading rules are:
+- Go long (= +1) when the shorter SMA is above the longer SMA
+- Go short (= -1) when the shorter SMA is below the longer SMA
+
+#+begin_src python
+# apply stock price, two SMAs, and resulting positions
+data = data.dropna()
+data['Position'] = np.where(data['SMA1'] > data['SMA2'], 1, -1)
+data.tail()
+
+ax = data.plot(secondary_y = 'Position')
+ax.get_legend().set_bbox_to_anchor((0.25, 0.85))
+plt.show()
+#+end_src
+
+The vectorized backtesting can now be implemented as follows.
+
+First, the log returns are calculated.
+Then the positionings, represented by +-1 are multiplied by the relevant log return
+This simple calculation is possible since a long position earns the return of the Apple stock and a short position earns the negative return of the Apple stock.
+Finally the log returns for the Apple stock and the algorithmic trading strategy based on SMAs need to be added up and the exponential function applied to arrive at the performance values
+
+#+begin_src python
+# calculate the log returns of the Apple stock
+data['Returns'] = np.log(data[symbol] / data[symbol].shift(1))
+# multiply the position values, shifted by a day, by the log
+# returns of the Apple stock. This shift is required to avoid a foresight bias
+data['Strategy'] = data['Position'].shift(1) * data['Returns']
+
+
+data = data.dropna()
+# sum up the log returns for the strategy and the benchmark invesetment
+# and calculate the exponential value to arrive at the absolute performance
+np.exp(data[['Returns', 'Strategy']].sum())
+# calculate the annualized volatility for the strategy and the benchmark investment
+data[['Returns', 'Strategy']].std() * 252 ** 0.5
+
+# performance of Apple stock and SMA-based trading strategy over time
+ax = data[['Returns', 'Strategy']].cumsum().apply(np.exp).plot()
+data['Position'].plot(ax=ax, secondary_y = 'Position', style='--')
+ax.get_legend().set_bbox_to_anchor((0.25, 0.85))
+plt.show()
+#+end_src
+
+The numbers show that the algorithmic trading strategy indeed outperforms the benchmark investment of passively holding the Apple stock. Due to the type and characteristics of the strategy, the annualized volatility is the same, such that it also outputforms the benchmark investment on a risk-adjusted basis.
