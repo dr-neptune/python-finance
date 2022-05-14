@@ -723,5 +723,202 @@ plt.show()
 ** Supervised Learning
 
 #+begin_src python
+from sklearn.datasets import make_classification
 
+n_samples = 100
+
+X, y = make_classification(n_samples=n_samples,
+                           n_features=2,
+                           n_informative=2,
+                           n_redundant=0,
+                           n_repeated=0,
+                           random_state=250)
+
+plt.figure()
+plt.hist(X)
+plt.show()
+plt.figure()
+plt.scatter(x=X[:, 0], y=X[:, 1], c=y, cmap='coolwarm')
+plt.show()
+#+end_src
+
+*** Gaussian Naive Bayes
+
+#+begin_src python
+from sklearn.naive_bayes import GaussianNB
+from sklearn.metrics import accuracy_score
+
+model = GaussianNB()
+model.fit(X, y)
+
+model.predict_proba(X).round(4)[:5]
+
+pred = model.predict(X)
+
+accuracy_score(y, pred)
+
+Xc = X[y == pred]
+Xf = X[y != pred]
+plt.figure()
+# correct predictions
+plt.scatter(x=Xc[:, 0], y=Xc[:, 1], c=y[y == pred], marker='o', cmap='coolwarm')
+# false predictions
+plt.scatter(x=Xf[:, 0], y=Xf[:, 1], c=y[y != pred], marker='x', cmap='coolwarm')
+plt.show()
+#+end_src
+
+*** Logistic Regression
+
+#+begin_src python
+from sklearn.linear_model import LogisticRegression
+
+model = LogisticRegression(C=1, solver='lbfgs')
+model.fit(X, y)
+
+model.predict_proba(X).round(4)[:5]
+
+pred = model.predict(X)
+
+accuracy_score(y, pred)
+
+Xc = X[y == pred]
+Xf = X[y != pred]
+plt.figure()
+# correct predictions
+plt.scatter(x=Xc[:, 0], y=Xc[:, 1], c=y[y == pred], marker='o', cmap='coolwarm')
+# false predictions
+plt.scatter(x=Xf[:, 0], y=Xf[:, 1], c=y[y != pred], marker='x', cmap='coolwarm')
+plt.show()
+#+end_src
+
+*** Decision Trees
+
+#+begin_src python
+from sklearn.tree import DecisionTreeClassifier
+
+model = DecisionTreeClassifier(max_depth=1)
+model.fit(X, y)
+
+pred = model.predict(X)
+accuracy_score(y, pred)
+
+
+print('{:>8s} | {:8s}'.format('depth', 'accuracy'))
+print(20 * '-')
+for depth in range(1, 7):
+    model = DecisionTreeClassifier(max_depth=depth)
+    model.fit(X, y)
+    acc = accuracy_score(y, model.predict(X))
+    print('{:8d} | {:8.2f}'.format(depth, acc))
+#+end_src
+
+*** Neural Networks
+
+#+begin_src python
+# DNN with scikit-learn
+from sklearn.neural_network import MLPClassifier
+
+model = MLPClassifier(solver='lbfgs', alpha=1e-5, hidden_layer_sizes=2 * [75], random_state=10)
+model.fit(X, y)
+pred = model.predict(X)
+accuracy_score(y, pred)
+#+end_src
+
+#+begin_src python
+import tensorflow as tf
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import confusion_matrix, accuracy_score, precision_score, recall_score
+from cytoolz import juxt
+
+x_train, y_train = X[:80], y[:80]
+x_test, y_test = X[80:], y[80:]
+
+scaler = StandardScaler()
+x_train_s = scaler.fit_transform(x_train)
+x_test_s = scaler.fit_transform(x_test)
+
+model = tf.keras.Sequential([
+    tf.keras.layers.Dense(128, activation='relu'),
+    tf.keras.layers.Dense(256, activation='relu'),
+    tf.keras.layers.Dense(256, activation='relu'),
+    tf.keras.layers.Dense(1, activation='sigmoid')
+])
+
+model.compile(
+    loss=tf.keras.losses.binary_crossentropy,
+    optimizer=tf.keras.optimizers.Adam(lr=0.03),
+    metrics=[
+        tf.keras.metrics.BinaryAccuracy(name='accuracy'),
+        tf.keras.metrics.Precision(name='precision'),
+        tf.keras.metrics.Recall(name='recall')
+    ]
+)
+
+history = model.fit(x_train_s, y_train, epochs=100)
+
+plt.plot(np.arange(1, 101), history.history['loss'], label='Loss')
+plt.plot(np.arange(1, 101), history.history['accuracy'], label='Accuracy')
+plt.plot(np.arange(1, 101), history.history['precision'], label='Precision')
+plt.plot(np.arange(1, 101), history.history['recall'], label='Recall')
+plt.title('Evaluation metrics', size=20)
+plt.xlabel('Epoch', size=14)
+plt.legend()
+plt.show()
+
+preds = model.predict(x_test_s)
+pred_classes = [1 if prob > 0.5 else 0 for prob in np.ravel(preds)]
+
+juxt(confusion_matrix, accuracy_score, precision_score, recall_score)(y_test, pred_classes)
+#+end_src
+
+** Feature Transforms
+
+#+begin_src python
+from sklearn import preprocessing
+
+# standard normally distributed data with 0 mean and unit variance
+xs = preprocessing.StandardScaler().fit_transform(X)
+# xform to a given range for every feature as defined by the min and max values per feature
+xm = preprocessing.MinMaxScaler().fit_transform(X)
+# scale to the unit norm (L1 or L2)
+xl1 = preprocessing.Normalizer(norm='l1').fit_transform(X)
+xl2 = preprocessing.Normalizer(norm='l2').fit_transform(X)
+
+plt.figure()
+markers = ['o', '.', 'x', '^', 'v']
+data_sets = [X, xs, xm, xl1, xl2]
+labels = ['raw', 'standard', 'minmax', 'norm(1)', 'norm(2)']
+for x, m, l in zip(data_sets, markers, labels):
+    plt.scatter(x=x[:, 0], y=x[:, 1], c=y, marker=m, cmap='coolwarm', label=l)
+plt.legend()
+plt.show()
+
+# for categorical features
+xb = preprocessing.Binarizer().fit_transform(X)
+xd = np.digitize(X, bins=[-1, 0, 1])
+#+end_src
+
+** Cross Validation
+
+#+begin_src python
+from sklearn.svm import SVC
+from sklearn.model_selection import train_test_split
+
+train_x, test_x, train_y, test_y = train_test_split(X, y, test_size=0.2, random_state=0)
+model = SVC(C=1, kernel='linear')
+model.fit(train_x, train_y)
+
+pred_train = model.predict(train_x)
+accuracy_score(train_y, pred_train)
+
+pred_test = model.predict(test_x)
+accuracy_score(test_y, pred_test)
+
+print('{:>8s} | {:8s}'.format('kernel', 'accuracy'))
+print(20 * '-')
+for kernel in ['linear', 'poly', 'rbf', 'sigmoid']:
+    model = SVC(C=1, kernel=kernel, gamma='auto')
+    model.fit(train_x, train_y)
+    acc = accuracy_score(test_y, model.predict(test_x))
+    print('{:>8s} | {:8.3f}'.format(kernel, acc))
 #+end_src
