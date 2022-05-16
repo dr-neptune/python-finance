@@ -1,0 +1,19 @@
+#+TITLE: Chapter 16: Automated Trading
+
+This chapter covers the following topics:
+
+- Capital Management
+  Depending on the strategy characteristics and the trading capital available, the Kelly criterion helps with sizing the trades
+- ML-Based Trading Strategy
+  The strategy needs to be backtested thoroughly w.r.t performance and risk characteristics
+- Online Algorithms
+  To deploy the strategy, it needs to be translated into an online algorithm that works with incoming stream data in real time
+- Infrastructure and Deployment
+- Logging and Monitoring
+
+* Capital Management
+
+A centrail question in algo trading is how much capital to deploy to a given strategy given the total available capital.
+Most will agree that the /maximization of long-term wealth/ is a good candidate objective. This is what Edward Thorpe had in mind when he derived the /Kelly criterion/ for investing.
+
+** The Kelly Criterion in a Binomial Setting
