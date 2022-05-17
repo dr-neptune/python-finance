@@ -79,7 +79,6 @@ plt.show()
 ** The Kelly Criterion for Stocks and Indices
 
 
-
 #+begin_src python
 
 #+end_src
