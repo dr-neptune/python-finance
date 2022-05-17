@@ -78,7 +78,69 @@ plt.show()
 
 ** The Kelly Criterion for Stocks and Indices
 
+One has to maximize the following quantity to achieve maximum long-term wealth when investing in the stock:
+
+For finite time:
+
+$G_n(f) = r + (\mu - r) \cdot f - \frac{\sigma^2}{2} \cdot f^2 + \mathcal{O}(\frac{1}{\sqrt{n}})$
+
+for infinitely many trading points in time -- i.e. continuous trading:
+
+$G_\infty (f) = r + (\mu - r) \cdot f - \frac{\sigma^2}{2} \cdot f^2$
+
+The optimal fraction $f$ then is given through the first-order condition by the expression:
+
+$f^* = \frac{\mu - r}{\sigma^2}$
+
+i.e. the expected excess return of the stock over the risk-free rate divided by the variance of the returns.
+
+
+A real-world example:
+
+The trading strategy under consideration is simply a /passive long position in the S&P 500 index/.
 
 #+begin_src python
+raw = pd.read_csv('data/tr_eikon_eod_data.csv')
+symbol = '.SPX'
 
+data = raw[symbol].to_frame()
+data['returns'] = np.log(data / data.shift(1)).dropna()
+
+mu = data.returns.mean() * 252  # annualized return
+sigma = data.returns.std() * 252 ** 0.5  # annualized volatility
+r = 0.0  # set the risk-free rate to 0
+f = (mu - r) / sigma ** 2  # calculate the optimal Kelly fraction to be invested in the strategy
 #+end_src
+
+The following code simulates the application of the Kelly criterion and the optimal leverage ratio. For simplicity and comparison reasons, the initial equity is set to 1 while the initially invested total capital is set to $f^*$. Depending on the performance of the capital deployed to the strategy, the total capital itself is adjusted daily according to the available equity.
+
+#+begin_src python
+equs = []
+def kelly_strategy(f):
+    global equs
+    equ = f'equity_{f:.2f}'
+    equs.append(equ)
+    cap = f'capital_{f:.2f}'
+    data[equ] = 1                # a new column for equity initialized to 1
+    data[cap] = data[equ] * f    # a new column for capital initialized to f
+    for i, t in enumerate(data.index[1:]):
+        t_1 = data.index[i]      # pick the right datetimeindex value for previous states
+        # calculate new capital position given the return
+        data.loc[t, cap] = data[cap].loc[t_1] * math.exp(data['returns'].loc[t])
+        # adjust the equity value according to capital position preference
+        data.loc[t, equ] = data[cap].loc[t] - data[cap].loc[t_1] + data[equ].loc[t_1]
+        # adjust the capital position given the new equity position and fixed leverage ratio
+        data.loc[t, cap] = data[equ].loc[t] * f
+
+kelly_strategy(f * 0.5)    # simulate kelly criterion for 1/2 f
+kelly_strategy(f * 0.66)   # 2/3 f
+kelly_strategy(f)          # 1 f
+
+print(data[equs].tail())
+
+ax = data['returns'].cumsum().apply(np.exp).plot(legend=True)
+data[equs].plot(ax=ax, legend=True)
+plt.show()
+#+end_src
+
+* ML-Based Strategy

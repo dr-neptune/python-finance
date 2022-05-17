@@ -52,3 +52,42 @@ plt.plot(c_3.mean(axis=1), 'y', label='$f^*=0.25$')
 plt.plot(c_4.mean(axis=1), 'm', label='$f^*=0.5$')
 plt.legend(loc=0)
 plt.show()
+
+# The Kelly Criterion for Stocks and Indices
+raw = pd.read_csv('data/tr_eikon_eod_data.csv')
+symbol = '.SPX'
+
+data = raw[symbol].to_frame()
+data['returns'] = np.log(data / data.shift(1)).dropna()
+
+mu = data.returns.mean() * 252  # annualized return
+sigma = data.returns.std() * 252 ** 0.5  # annualized volatility
+r = 0.0  # set the risk-free rate to 0
+f = (mu - r) / sigma ** 2  # calculate the optimal Kelly fraction to be invested in the strategy
+
+equs = []
+def kelly_strategy(f):
+    global equs
+    equ = f'equity_{f:.2f}'
+    equs.append(equ)
+    cap = f'capital_{f:.2f}'
+    data[equ] = 1                # a new column for equity initialized to 1
+    data[cap] = data[equ] * f    # a new column for capital initialized to f
+    for i, t in enumerate(data.index[1:]):
+        t_1 = data.index[i]      # pick the right datetimeindex value for previous states
+        # calculate new capital position given the return
+        data.loc[t, cap] = data[cap].loc[t_1] * math.exp(data['returns'].loc[t])
+        # adjust the equity value according to capital position preference
+        data.loc[t, equ] = data[cap].loc[t] - data[cap].loc[t_1] + data[equ].loc[t_1]
+        # adjust the capital position given the new equity position and fixed leverage ratio
+        data.loc[t, cap] = data[equ].loc[t] * f
+
+kelly_strategy(f * 0.5)    # simulate kelly criterion for 1/2 f
+kelly_strategy(f * 0.66)   # 2/3 f
+kelly_strategy(f)          # 1 f
+
+print(data[equs].tail())
+
+ax = data['returns'].cumsum().apply(np.exp).plot(legend=True)
+data[equs].plot(ax=ax, legend=True)
+plt.show()
