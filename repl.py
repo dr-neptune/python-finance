@@ -65,7 +65,7 @@ sigma = data.returns.std() * 252 ** 0.5  # annualized volatility
 r = 0.0  # set the risk-free rate to 0
 f = (mu - r) / sigma ** 2  # calculate the optimal Kelly fraction to be invested in the strategy
 
-equs = []
+  /-equs = []
 def kelly_strategy(f):
     global equs
     equ = f'equity_{f:.2f}'
@@ -90,4 +90,87 @@ print(data[equs].tail())
 
 ax = data['returns'].cumsum().apply(np.exp).plot(legend=True)
 data[equs].plot(ax=ax, legend=True)
+plt.show()
+
+# ML-Based Trading Strategy
+
+## Vectorized Backtesting
+import fxcmpy
+api = fxcmpy.fxcmpy(config_file='fxcm.cfg')
+
+data = api.get_candles('EUR/USD', period='m5',
+                       start='2018-06-01 00:00:00',
+                       stop='2018-06-30 00:00:00')
+
+data.iloc[-5:, 4:]
+
+# calculate the average bid-ask spread
+spread = (data['askclose'] - data['bidclose']).mean()
+
+# calculate the mid close prices from the ask and bid close prices
+data['midclose'] = (data['askclose'] + data['bidclose']) / 2
+
+# calculate the average proportional transaction costs given the average spread
+# and average mid close price
+ptc = spread / data['midclose'].mean()
+
+data['midclose'].plot(legend=True)
+plt.show()
+
+# create binarized data
+data['returns'] = np.log(data['midclose'] / data['midclose'].shift(1)).dropna()
+
+lags = 5
+
+cols = []
+for lag in range(1, lags + 1):
+    col = f'lag_{lag}'
+    # creates the lagged return data given the number of lags
+    data[col] = data['returns'].shift(lag)
+    cols.append(col)
+
+data = data.dropna()
+
+# transform the feature values to binary data
+data[cols] = np.where(data[cols] > 0, 1, 0)
+
+# transform the return data to directional label data
+data['direction'] = np.where(data['returns'] > 0, 1, -1)
+
+
+data[cols + ['direction']].head()
+
+# fit model
+from sklearn.svm import SVC
+from sklearn.metrics import accuracy_score
+
+model = SVC(C=1, kernel='linear', gamma='auto')
+split = int(len(data) * .8)
+train = data.iloc[:split].copy()
+test = data.iloc[split:].copy()
+
+model.fit(train[cols], train['direction'])
+test['position'] = model.predict(test[cols])
+
+accuracy_score(train['direction'], model.predict(train[cols]))
+accuracy_score(test['direction'], test['position'])
+
+# check performance outside of hit rate
+
+# derive log returns for the ML-based algorithmic trading strategy
+test['strategy'] = test['position'] * test['returns']
+
+# calculate number of trades implied by the trading strategy based on changes in the position
+sum(test['position'].diff() != 0)
+
+# whenever a trade takes place, the proportional transaction costs are subtracted from
+# the strategy's log return on that day
+test['strategy_tc'] = np.where(test['position'].diff() != 0,
+                               test['strategy'] - ptc,
+                               test['strategy'])
+
+
+test[['returns', 'strategy', 'strategy_tc']].sum().apply(np.exp)
+
+test[['returns', 'strategy', 'strategy_tc']].cumsum().apply(np.exp).plot()
 plt.show()
