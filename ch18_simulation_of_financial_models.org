@@ -1,91 +1,30 @@
-import numpy as np
-import pandas as pd
-import datetime as dt
-import matplotlib.pyplot as plt
-import matplotlib
-matplotlib.use('tkAgg')
+#+TITLE: Chapter 18 : Simulation of Financial Models
 
-def get_year_deltas(date_list, day_count=365.):
-    '''
-    Return vector of floats with day deltas in year fractions. Initial value normalized to 0
-    '''
-    start = date_list[0]
-    delta_list = [(date - start).days / day_count for date in date_list]
-    return np.array(delta_list)
+This chapter applies the monte carlo simulation of stochatic processes that we looked at in chapter 12 to implement simulation classes.
 
-dates = [dt.datetime(2020, 1, 1), dt.datetime(2020, 7, 1), dt.datetime(2021, 1, 1)]
-get_year_deltas(dates)
+The chapter comprises the following sections:
 
-# constant short rate
-class ConstantShortRate:
-    '''
-    class for constant short rate discounting
-    '''
-    def __init__(self, name, short_rate):
-        self.name = name
-        self.short_rate = short_rate
-        if short_rate < 0:
-            raise ValueError('short rate negative')
+Random Number Generation
+  Develops a function to generate standard normally distributed random numbers using variance reduction techniques.
 
-    def get_discount_factors(self, date_list, dtobjects=True):
-        if dtobjects is True:
-            dlist = get_year_deltas(date_list)
-        else:
-            dlist = np.array(date_list)
-        dflist = np.exp(self.short_rate * np.sort(-dlist))
-        return np.array((date_list, dflist)).T
+Generic Simulation Class
+  Develops a generic simulation class from which the other specific simulation classes inherit fundamental attributes and methods
 
-csr = ConstantShortRate('csr', 0.05)
+Geometric Brownian Motion
+  Looks at GBM in the light of option pricing literature
 
-csr.get_discount_factors(dates)
-deltas = get_year_deltas(dates)
-csr.get_discount_factors(deltas, dtobjects=False)
+Jump Diffusion
+  The jump diffusion adds a log-normally distributed jump component to the GBM. This allows one to take into account that, for example,
+  short-term out-of-the-money (OTM) options often seem to have priced in the possibility of larger jumps; in other words, relying on GBM
+  as a financial model often cannot explain the market values of such OTM options satisfactorily, while a jump diffusion may do so
 
-# market environments
-class MarketEnvironment:
-    '''class to model a market environment relevant for valuation'''
-    def __init__(self, name, pricing_date):
-        self.name = name
-        self.pricing_date = pricing_date
-        self.constants = {}
-        self.lists = {}
-        self.curves = {}
+Square Root Diffusion
+  The square root diffusion (popularized by Cox, Ingersoll, and Ross) is used to model mean-reverting quantities like interest rates and
+  volatility; in addition, the process stays positive.
 
-    def add_constant(self, key, constant):
-        self.constants[key] = constant
+* Random Number Generation
 
-    def get_constant(self, key):
-        return self.constants[key]
-
-    def add_list(self, key, list_object):
-        self.lists[key] = list_object
-
-    def get_list(self, key):
-        return self.lists[key]
-
-    def add_curve(self, key, curve):
-        self.curves[key] = curve
-
-    def get_curve(self, key):
-        return self.curves[key]
-
-    def add_environment(self, env):
-        self.constants.update(env.constants)
-        self.lists.update(env.lists)
-        self.curves.update(env.curves)
-
-me = MarketEnvironment('me_gbm', dt.datetime(2020, 1, 1))
-me.add_constant('initial_value', 36.)
-me.add_constant('volatility', 0.2)
-me.add_constant('final_date', dt.datetime(2020, 12, 31))
-me.add_constant('currency', 'EUR')
-me.add_constant('frequency', 'M')
-me.add_constant('paths', 10000)
-me.add_curve('discount_curve', csr)
-me.get_constant('volatility')
-me.get_curve('discount_curve').short_rate
-
-# Chapter 18 : Simulation of Financial Models
+#+begin_src python
 def sn_random_numbers(shape, antithetic=True, moment_matching=True, fixed_seed=False):
     '''Returns an ndarray of shape shape with (pseudo)random numbers that are std normally distributed'''
     if fixed_seed:
@@ -104,8 +43,11 @@ def sn_random_numbers(shape, antithetic=True, moment_matching=True, fixed_seed=F
         return ran
 
 snrn = sn_random_numbers((2, 2, 2), False, False, True)
+#+end_src
 
-# generic simulation class
+* Generic Simulation Class
+
+#+begin_src python
 class SimulationClass:
     '''provides base methods for simulation classes'''
     def __init__(self, name, mar_env, corr):
@@ -156,8 +98,11 @@ class SimulationClass:
         if self.instrument_values is None or not fixed_seed:
             self.generate_paths(fixed_seed=fixed_seed, day_count=365.)
         return self.instrument_values
+#+end_src
 
-# geometric brownian motion
+* Geometric Brownian Motion
+
+#+begin_src python
 class GeometricBrownianMotion(SimulationClass):
     '''class to generate simulated paths based on the Black-Scholes-Metric geometric Brownian motion model'''
     def __init__(self, name, mar_env, corr=False):
@@ -173,7 +118,7 @@ class GeometricBrownianMotion(SimulationClass):
         self.instrument_values = None
 
     def generate_paths(self, fixed_seed=False, day_count=365.):
-        if self.time_grid is None:
+        if not self.time_grid:
             self.generate_time_grid()
 
         # num of dates for time grid
@@ -200,8 +145,11 @@ class GeometricBrownianMotion(SimulationClass):
             paths[t] = paths[t - 1] * np.exp((short_rate - 0.5 * self.volatility ** 2) * dt +
                                              self.volatility * np.sqrt(dt) * ran)
         self.instrument_values = paths
+#+end_src
 
-# a use case
+* A Use Case
+
+#+begin_src python
 me_gbm = MarketEnvironment('me_gbm', dt.datetime(2020, 1, 1))
 me_gbm.add_constant('initial_value', 36.)
 me_gbm.add_constant('volatility', 0.2)
@@ -228,8 +176,11 @@ l1 = plt.legend([p1[0], p2[0]], ['low volatility', 'high volatility'], loc=2)
 plt.gca().add_artist(l1)
 plt.xticks(rotation=30)
 plt.show()
+#+end_src
 
-# jump diffusion
+* Jump Diffusion
+
+#+begin_src python
 class JumpDiffusion(SimulationClass):
     '''class to generate simulated paths based on the Merton jump diffusion model'''
     def __init__(self, name, mar_env, corr=False):
@@ -285,7 +236,7 @@ class JumpDiffusion(SimulationClass):
                                               (np.exp(self.mu + self.delt * sn2[t]) - 1) * poi)
         self.instrument_values = paths
 
-# a use case
+
 me_jd = MarketEnvironment('me_jd', dt.datetime(2020, 1, 1))
 me_jd.add_constant('lambda', 0.3)
 me_jd.add_constant('mu', -0.75)
@@ -308,8 +259,11 @@ l1 = plt.legend([p1[0], p2[0]], ['low volatility', 'high volatility'], loc=2)
 plt.gca().add_artist(l1)
 plt.xticks(rotation=30)
 plt.show()
+#+end_src
 
-# square root diffusion
+* Square-Root Diffusion
+
+#+begin_src python
 class SquareRootDiffusion(SimulationClass):
     '''class to generate simulated paths based on the Cox-Ingersoll-Ross Square Root Diffusion model'''
     def __init__(self, name, mar_env, corr=False):
@@ -368,6 +322,7 @@ class SquareRootDiffusion(SimulationClass):
             paths[t] = np.maximum(0, paths_[t])
         self.instrument_values = paths
 
+
 # a use case
 me_srd = MarketEnvironment('me_srd', dt.datetime(2020, 1, 1))
 me_srd.add_constant('initial_value', 0.25)
@@ -388,3 +343,4 @@ plt.plot(srd.time_grid, srd.get_instrument_values()[:, :10])
 plt.axhline(me_srd.get_constant('theta'), color='r', ls='--', lw=2.0)
 plt.xticks(rotation=30)
 plt.show()
+#+end_src

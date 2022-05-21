@@ -1,0 +1,157 @@
+#+TITLE: Chapter 17: Valuation Framework
+
+This chapter comprises the following sections:
+
+- Fundamental Theorem of Asset Pricing
+
+- Risk-Neutral Discounting
+  This section develops a class for the risk-neutral discounting of future payoffs of options and other derivative instruments
+
+- Market Environments
+  This section develops a class to manage market environments for the pricing of single instruments and portfolios composed of multiple instruments
+
+* Fundamental Theorem of Asset Pricing
+
+The central notion underlying this theorem is the concept of a /martingale measure/, i.e. the probability that removes the drift from a discounted risk factor (stochastic process).
+In other words, under a martingale measure, all risk factors drift with the risk-free short rate -- and not with any other market rate involving some kind of risk premium over the risk-free short rate.
+
+#+begin_quote
+Consider the general market model $\mathcal{M}$. According to the /Fundamental Theorem of Asset Pricing/, the following 3 statements are equivalent:
+
+- There are no arbitrage opportunities in the market model $\mathcal{M}$
+- The set $\mathbb{Q}$ of P-equivalent martingale measures is nonempty
+- The set $\mathbb{P}$ of consistent linear price systems is nonempty
+#+end_quote
+
+When it comes to valuation and pricing of contingent claims (i.e., options, derivatives, futures, forwards, swaps, etc.) the importance of the theorem is illustrated by the following corollary:
+
+#+begin_quote
+If the market model $\mathcal{M}$ is arbitrage-free, then there exists a unique price $V_0$ associated with any attainable (i.e., replicable) contingent claim (option, derivative, etc) $V_T$.
+It satisfies $\forall Q \in \mathbb{Q} : V_0 = E_0^Q (e^{-rT} V_T)$ where $e^{-rT}$ is the relevant risk-neutral discount factor for a constant short rate $r$.
+#+end_quote
+
+Finally, consider market completeness in the general market model:
+
+#+begin_quote
+The market model $\mathcal{M}$ is /complete/ if it is arbitrage-free and if every contingent claim (option, derivative, etc) is attainable (i.e. replicable)
+
+Alternatively,
+Suppose that the market model $\mathcal{M}$ is arbitrage-free. The market model is complete iff $\mathcal{M}$ is a singleton, i.e., if there is a unique P-equivalent martingale measure.
+#+end_quote
+
+* Risk Neutral Discounting
+
+Risk-neutral discounting is central to the risk-neutral valuation approach. This section develops a python class for risk-neutral discounting.
+
+It pays to first have a closer look at the modeling and handling of /relevant dates/ for a valuation.
+
+** Modeling and Handling Dates
+
+#+begin_src python
+import numpy as np
+import pandas as pd
+import datetime as dt
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('tkAgg')
+
+def get_year_deltas(date_list, day_count=365.):
+    '''
+    Return vector of floats with day deltas in year fractions. Initial value normalized to 0
+    '''
+    start = date_list[0]
+    delta_list = [(date - start).days / day_count for date in date_list]
+    return np.array(delta_list)
+
+dates = [dt.datetime(2020, 1, 1), dt.datetime(2020, 7, 1), dt.datetime(2021, 1, 1)]
+get_year_deltas(dates)
+#+end_src
+
+** Constant Short Rate
+
+The exposition to follow focuses on the simplest case for discounting by the short rate; namely, the case where the short rate is /constant through time/. Many option pricing models, like Black-Scholes-Merton, Merton, or Cox-Ross-Rubenstein make this assumption.
+
+In such a case, the general discount factor as of today, given a future date $t$ and a constant short rate of $r$, is then given by $D_0 (t) = e^{-rt}$.
+
+The discount factors can also be interpreted as the value of a /unit zero-coupon bond/ (ZCB) as of today, maturing at t and T, respectively. Given two dates $t \geq s \geq 0$, the discount factor relevant for discounting from t to s is then given by the equation $D_s(t) = D_0(t) / D_0(s) = e^{-rt} / e^{-rs} = e^{-rt} \cdot e^{rs} = e^{-r(t - s)}$
+
+
+#+begin_src python
+class ConstantShortRate:
+    '''
+    class for constant short rate discounting
+    '''
+    def __init__(self, name, short_rate):
+        self.name = name
+        self.short_rate = short_rate
+        if short_rate < 0:
+            raise ValueError('short rate negative')
+
+    def get_discount_factors(self, date_list, dtobjects=True):
+        if dtobjects is True:
+            dlist = get_year_deltas(date_list)
+        else:
+            dlist = np.array(date_list)
+        dflist = np.exp(self.short_rate * np.sort(-dlist))
+        return np.array((date_list, dflist)).T
+
+csr = ConstantShortRate('csr', 0.05)
+
+csr.get_discount_factors(dates)
+deltas = get_year_deltas(dates)
+csr.get_discount_factors(deltas, dtobjects=False)
+#+end_src
+
+** Market Environments
+
+Market environment is "just" a name for a collection of data and Python objects.
+It mainly consists of 3 dictionaries to store the following types of data and Python objects:
+
+Constants (like model parameters or option maturity dates)
+Lists (collections of objects in general, like a list of objects modeling securities)
+Curves (objects for discounting; e.g. the ConstantShortRate class)
+
+#+begin_src python
+class MarketEnvironment:
+    '''class to model a market environment relevant for valuation'''
+    def __init__(self, name, pricing_date):
+        self.name = name
+        self.pricing_date = pricing_date
+        self.constants = {}
+        self.lists = {}
+        self.curves = {}
+
+    def add_constant(self, key, constant):
+        self.constants[key] = constant
+
+    def get_constant(self, key):
+        return self.constants[key]
+
+    def add_list(self, key, list_object):
+        self.lists[key] = list_object
+
+    def get_list(self, key):
+        return self.lists[key]
+
+    def add_curve(self, key, curve):
+        self.curves[key] = curve
+
+    def get_curve(self, key):
+        return self.curves[key]
+
+    def add_environment(self, env):
+        self.constants.update(env.constants)
+        self.lists.update(env.lists)
+        self.curves.update(env.curves)
+
+me = MarketEnvironment('me_gbm', dt.datetime(2020, 1, 1))
+me.add_constant('initial_value', 36.)
+me.add_constant('volatility', 0.2)
+me.add_constant('final_date', dt.datetime(2020, 12, 31))
+me.add_constant('currency', 'EUR')
+me.add_constant('frequency', 'M')
+me.add_constant('paths', 10000)
+me.add_curve('discount_curve', csr)
+me.get_constant('volatility')
+me.get_curve('discount_curve').short_rate
+#+end_src
