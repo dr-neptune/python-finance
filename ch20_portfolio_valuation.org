@@ -1,0 +1,254 @@
+#+TITLE: Chapter 20: Portfolio Valuation
+
+Discounting
+  The relevant risk-neutral discounting is taken care of by the ConstantShortRate class
+
+Relevant Data
+  Relevant data, parameters, and other input are stored in (several) instances of the MarketEnvironment class
+
+Simulation Objects
+  Relevant risk factors (underlyings) are modeled as instances of one of 3 simulation classes:
+    - GeometricBrownianMotion
+    - JumpDiffusion
+    - SquareRootDiffusion
+
+Valuation Objects
+  Options and derivatives to be valued are modeled as instances of one of two valuation classes:
+    - ValuationMCSEuropean
+    - ValuationMCSAmerican
+
+One last step is needed: the valuation of possibly complex /portfolios/ of options and derivatives.
+
+Nonredudancy
+  Every risk factor (underlying) is modeled only once and potentially used by multiple valuation objects
+
+Correlations
+  Correlations between risk factors have to be accounted for
+
+Positions
+  An option position, for example, consists of a certain number of option contracts
+
+This chapter presents 2 new classes: a simple one to model a /derivatives position/,
+and a more complex one to model a /derivatives portfolio/.
+
+* Derivatives Positions
+
+In principle, a /derivatives position/ is nothing more than a combination of a valuation object and a quantity for the instrument modeled.
+
+#+begin_src python
+class DerivativesPosition:
+    '''
+    class to model a derivatives position
+
+    name: name of object
+    quantity: number of assets/derivatives making up the position
+    underlying: name of asset/risk factor for the derivative
+    mar_env: instance of market environment
+    otype: valuation class to use
+    payoff_func: payoff string for the derivative
+    '''
+    def __init__(self, name, quantity, underlying, mar_env, otype, payoff_func):
+        self.name = name
+        self.quantity = quantity
+        self.underlying = underlying
+        self.mar_env = mar_env
+        self.otype = otype
+        self.payoff_func = payoff_func
+
+    def get_info(self):
+        print('NAME')
+        print(self.name, '\n')
+        print('QUANTITY')
+        print(self.quantity, '\n')
+        print('UNDERLYING')
+        print(self.underlying, '\n')
+        print('MARKET ENVIRONMENT')
+        print('\n**Constants**')
+        for key, value in self.mar_env.constants.items():
+            print(key, value)
+        print('\n**Lists**')
+        for key, value in self.mar_env.lists.items():
+            print(key, value)
+        print('\n**Curves**')
+        for key, value in self.mar_env.curves.items():
+            print(key, value)
+        print('\nOPTION TYPE')
+        print(self.otype, '\n')
+        print('PAYOFF FUNCTION')
+        print(self.payoff_func)
+
+# a use case
+me_gbm = MarketEnvironment('me_gbm', dt.datetime(2020, 1, 1))
+me_gbm.add_constant('initial_value', 36.)
+me_gbm.add_constant('volatility', 0.2)
+me_gbm.add_constant('currency', 'EUR')
+me_gbm.add_constant('model', 'gbm')
+
+me_am_put = MarketEnvironment('me_am_put', dt.datetime(2020, 1, 1))
+me_am_put.add_constant('maturity', dt.datetime(2020, 12, 31))
+me_am_put.add_constant('strike', 40.)
+me_am_put.add_constant('currency', 'EUR')
+
+payoff_func = 'np.maximum(strike - instrument_values, 0)'
+
+am_put_pos = DerivativesPosition(name='am_put_pos',
+                                 quantity=3,
+                                 underlying='gbm',
+                                 mar_env=me_am_put,
+                                 otype='American',
+                                 payoff_func=payoff_func)
+
+am_put_pos.get_info()
+#+end_src
+
+* Derivatives Portfolios
+
+From a portfolio perspective, a /relevant market/ is mainly composed of the relevant risk factors (underlyings) and their correlations, as well as the derivatives and derivatives positions, respectively, to be valued. Theoretically, the analysis to follow now deals with a general market model $\mathcal{M}$ and applies the Fundamental Theorem of Asset Pricing.
+
+#+begin_src python
+models = {'gbm': GeometricBrownianMotion,
+          'jd': JumpDiffusion,
+          'srd': SquareRootDiffusion}
+
+otypes = {'European': ValuationMCSEuropean,
+          'American': ValuationMCSAmerican}
+
+class DerivativesPortfolio:
+    '''
+    class for modeling and valuing portfolios of derivatives positions
+
+    name: name of the object
+    positions: dictionary of positions
+    val_env: market environment for the valuation
+    assets: dictionary of market environments for the assets
+    correlations: correlations between assets
+    fixed_seed: flag for fixed random number generator seed
+    '''
+    def __init__(self, name, positions, val_env, assets, correlations=None, fixed_seed=False):
+        self.name = name
+        self.positions = positions
+        self.val_env = val_env
+        self.assets = assets
+        self.underlyings = set()
+        self.correlations = correlations
+        self.time_grid = None
+        self.underlying_objects = {}
+        self.valuation_objects = {}
+        self.fixed_seed = fixed_seed
+        self.special_dates = []
+        for pos in self.positions:
+            # determine the earliest starting date
+            self.val_env.constants['starting_date'] = min(self.val_env.constants['final_date'],
+                                                          positions[pos].mar_env.pricing_date)
+            # determine the latest date of relevance
+            self.val_env.constants['final_date'] = max(self.val_env.constants['final_date'],
+                                                       positions[pos].mar_env['maturity'])
+            # collect all underlyings and add to set (for uniqueness)
+            self.underlyings.add(positions[pos].underlying)
+
+        # generate general time grid
+        start = self.val_env.constants['starting_ate']
+        end = self.val_env.constants['final_date']
+        time_grid = list(pd.date_range(start=start,
+                                       end=end,
+                                       freq=self.val_env.constants['frequency']).to_pydatetime())
+
+        for pos in self.positions:
+            maturity_date = positions[pos].mar_env.constants['maturity']
+            if maturity_date not in time_grid:
+                time_grid.insert(0, maturity_date)
+                self.special_dates.append(maturity_date)
+
+        if start not in time_grid:
+            time_grid.inset(0, start)
+        if end not in time_grid:
+            time_grid.append(end)
+
+        # delete duplicates
+        time_grid = list(set(time_grid))
+        time_grid.sort()
+
+        self.time_grid = np.array(time_grid)
+        self.val_env.add_list('time_grid', self.time_grid)
+
+        if correlations is not None:
+            ul_list = sorted(self.underlyings)
+            correlation_matrix = np.zeros((len(ul_list), len(ul_list)))
+            np.fill_diagonal(correlation_matrix, 1.0)
+            correlation_matrix = pd.DataFrame(correlation_matrix, index=ul_list, columns=ul_list)
+
+            for i, j in correlations:
+                corr = min(corr, 0.999999)
+                # fill correlation matrix
+                correlation_matrix.loc[i, j] = corr
+                correlation_matrix.loc[j, i] = corr
+
+            # determine Cholesky Matrix
+            cholesky_matrix = np.linalg.cholesky(np.array(correlation_matrix))
+
+            # dict with index positions for the slice of the random number array to be used by respective underlying
+            rn_set = {asset: ul_list.index(asset) for asset in self.underlyings}
+
+            # random numbers array, to be used by all underlyings (if correlations exist)
+            random_numbers = sn_random_numbers((len(rn_set),
+                                                len(self.time_grid),
+                                                self.val_env.constants['paths']),
+                                                fixed_seed=fixed_seed)
+
+            # add all to valuation environment that is to be shared with every underlying
+            self.val_env.add_list('cholesky_matrix', cholesky_matrix)
+            self.val_env.add_list('random_numbers', random_numbers)
+            self.val_env.add_list('rn_set', rn_set)
+
+        for asset in self.underlyings:
+            # select market environment of asset
+            mar_env = self.assets[asset]
+            # add valuation environment to market environment
+            mar_env.add_environment(val_env)
+            # select right simulation class
+            model = models[mar_env.constants['model']]
+            # instantiate simulation class
+            if correlations is not None:
+                self.underlying_objects[asset] = model(asset, mar_env, corr=True)
+            else:
+                self.underlying_objects[asset] = model(asset, mar_env, corr=False)
+
+        for pos in positions:
+            # select right valuation class (European, American)
+            val_class = otypes[positions(pos).otype]
+            # pick market environment and add valuation environment
+            mar_env = positions[pos].mar_env
+            mar_env.add_environment(self.val_env)
+            # instantiate valuation class
+            self.valuation_objects[pos] = val_class(name=positions[pos].name,
+                                                    mar_env=mar_env,
+                                                    underlying=self.underlying_objects[positions[pos].underlying],
+                                                    payoff_func=payoff_func)
+
+    def get_positions(self):
+        '''convenience method to get information about all derivative positions in a portfolio'''
+        for pos in self.positions:
+            bar = '\n' + 50 * '-'
+            print(bar)
+            self.positions[pos].get_info()
+            print(bar)
+
+    def get_statistics(self, fixed_seed=False):
+        '''provides portfolio statistics'''
+        res_list = []
+        # iterate over all positions in a portfolio
+        for pos, value in self.valuation_objects.items():
+            p = self.positions[pos]
+            pv = value.present_value(fixed_seed=fixed_seed)
+            res_list.append([p.name,
+                             p.quantity,
+                             pv,
+                             value.currency,
+                             pv * p.quantity,
+                             value.delta() * p.quantity,
+                             value.vega() * p.quantity])
+
+        # generate a dataframe with all results
+        res_df = pd.DataFrame(res_list, columns=['name', 'quant', 'value', 'curr', 'pos_value', 'pos_delta', 'pos_vega'])
+        return res_df
+#+end_src

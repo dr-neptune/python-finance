@@ -1,1 +1,312 @@
 #+TITLE: Chapter 19: Derivatives Valuation
+
+This chapter introduces and uses the Least-Squares Monte Carlo algorithm, which has become a benchmark algorithm
+when it comes to American options valuations based on Monte Carlo simulation.
+
+* Generic Valuation Class
+
+One topic covered by the class below is the estimation of Greeks.
+
+Assume that a continuously differentiable function $V(S_0, \sigma_0)$ is available that represents the present value of an option.
+The /delta/ of an option is then defined as the first partial derivative with respect to the current value of the underlying $S_0$; i.e. $\Delta = \frac{\delta V(\cdot)}{\delta S_0}$
+
+Suppose now that from Monte Carlo valuation there is a numerical Monte Carlo estimator $\bar{V}(S_0, \sigma_0)$ available for the option value. A numerical approximation for the delta of the option is then given by:
+
+$\bar{\Delta} = \frac{\bar{V}(S_0 + \Delta S, \sigma_0) - \bar{V}(S_0, \sigma_0)}{\Delta S}$
+
+$\Delta S > 0$
+
+Similarly, the /vega/ of the instrument is defined as the first partial derivative of the present value with respect to the current (instantaneous) volatility $\sigma_0$, i.e. $V = \frac{\delta V(\cdot)}{\delta \sigma_0}$. Again, assuming the existence of a Monte Carlo estimator for the value of the option:
+
+$V = \frac{\bar{V}(S_0, \sigma_0 + \Delta \sigma) - \bar{V}(S_0, \sigma_0)}{\Delta \sigma}$
+
+$\Delta \sigma > 0$
+
+
+Note that the discussion of delta and vega is based only on the existence of either a differentiable function or a Monte Carlo estimator for the present value of an option.
+
+#+begin_src python
+class ValuationClass:
+    '''basic class for single-factor valuation'''
+    def __init__(self, name, underlying, mar_env, payoff_func=''):
+        self.name = name
+        self.pricing_date = mar_env.pricing_date
+        try:
+            self.strike = mar_env.get_constant('strike')
+        except:
+            pass
+        self.maturity = mar_env.get_constant('maturity')
+        self.currency = mar_env.get_constant('currency')
+        self.frequency = underlying.frequency
+        self.paths = underlying.paths
+        self.discount_curve = underlying.discount_curve
+        self.payoff_func = payoff_func
+        self.underlying = underlying
+        self.underlying.special_dates.extend([self.pricing_date, self.maturity])
+
+    def update(self, initial_value=None, volatility=None, strike=None, maturity=None):
+        if initial_value is not None:
+            self.underlying.update(initial_value=initial_value)
+        if volatility is not None:
+            self.underlying.update(volatility=volatility)
+        if strike is not None:
+            self.strike = strike
+        if maturity is not None:
+            self.maturity = maturity
+            if maturity not in self.underlying.time_grid:
+                self.underlying.special_dates.append(maturity)
+                self.underlying.instrument_values = None
+
+    def delta(self, interval=None, accuracy=4):
+        if interval is None:
+            interval = self.underlying.initial_value / 50.
+
+        # forward difference approximation
+        # calculate left value for numerical delta
+        value_left = self.present_value(fixed_seed=True)
+        # numerical underlying value for right value
+        initial_del = self.underlying.initial_value + interval
+        self.underlying.update(initial_value=initial_del)
+        # calculate right value for numerical delta
+        value_right = self.present_value(fixed_seed=True)
+        # reset the initial value of the simulation object
+        self.underlying.update(initial_value=initial_del - interval)
+        delta = (value_right - value_left) / interval
+
+        if delta < -1.0:
+            return -1.0
+        elif delta > 1.0:
+            return 1.0
+        else:
+            return round(delta, accuracy)
+
+    def vega(self, interval=0.01, accuracy=4):
+        if interval < self.underlying.volatility / 50.:
+            interval = self.underlying.volatility / 50.
+
+        # forward difference approximation
+        value_left = self.present_value(fixed_seed=True)
+        vola_del = self.underlying.volatility + interval
+        self.underlying.update(volatility=vola_del)
+        value_right = self.present_value(fixed_seed=True)
+        self.underlying.update(volatility=vola_del - interval)
+        vega = (value_right - value_left) / interval
+        return round(vega, accuracy)
+#+end_src
+
+* European Exercise
+
+The first case to which the generic valuation class is specialized is the case of European exercise. To this end, consider the following simplified recipe to generate a Monte Carlo estimator for an option value:
+
+1. Simulate the relevant underlying risk factor $S$ under the risk-neutral measure $I$ times to come up with as many simulated values of the underlying at the maturity of the option $T$ -- i.e. $\bar{S_T}(i)$ with $i \in \{1, 2, ..., I\}$
+
+2. Calculate the payoff $h_T$ of the option at maturity for every simulated value of the underlying -- i.e. $h_T(\bar{S_t}(i))$, $i \in \{1, 2, ..., I\}$
+
+3. Derive the Monte Carlo estimator for the option's present value as $\bar{V_0} \equiv e^{-rT}\frac{1}{i} \Sigma_{t=1}^I h_T(\bar{S_T}(i))$
+
+* The Valuation Class
+
+#+begin_src python
+class ValuationMCSEuropean(ValuationClass):
+    '''class to value European options with arbitrary payoff by single-factor Monte Carlo simulation'''
+    def generate_payoff(self, fixed_seed=False):
+        try:
+            strike = self.strike
+        except AttributeError:
+            pass
+        paths = self.underlying.get_instrument_values(fixed_seed=fixed_seed)
+        time_grid = self.underlying.time_grid
+        try:
+            time_index = np.where(time_grid == self.maturity)[0]
+            time_index = int(time_index)
+        except:
+            print('Maturity date not in time grid of underlying')
+        maturity_value = paths[time_index]
+        # average value over whole path
+        mean_value = np.mean(paths[:time_index], axis=1)
+        # maximum value over whole path
+        max_value = np.amax(paths[:time_index], axis=1)[-1]
+        # minimum value over whole path
+        min_value = np.amin(paths[:time_index], axis=1)[-1]
+        try:
+            payoff = eval(self.payoff_func)
+            return payoff
+        except:
+            print('Error evaluation payoff function')
+
+    def present_value(self, accuracy=6, fixed_seed=False, full=False):
+        cash_flow = self.generate_payoff(fixed_seed=fixed_seed)
+        discount_factor = self.discount_curve.get_discount_factors((self.pricing_date, self.maturity))[0, 1]
+        result = discount_factor * np.sum(cash_flow) / len(cash_flow)
+        if full:
+            return round(result, accuracy), discount_factor * cash_flow
+        else:
+            return round(result, accuracy)
+## Use Case
+me_gbm = MarketEnvironment('me_gbm', dt.datetime(2020, 1, 1))
+me_gbm.add_constant('initial_value', 36.)
+me_gbm.add_constant('volatility', 0.2)
+me_gbm.add_constant('final_date', dt.datetime(2020, 12, 31))
+me_gbm.add_constant('currency', 'EUR')
+me_gbm.add_constant('frequency', 'M')
+me_gbm.add_constant('paths', 10000)
+me_gbm.add_curve('discount_curve', ConstantShortRate('csr', 0.06))
+
+gbm = GeometricBrownianMotion('gbm', me_gbm)
+
+# define the market environment for the option itself
+me_call = MarketEnvironment('me_call', me_gbm.pricing_date)
+me_call.add_constant('strike', 40.)
+me_call.add_constant('maturity', dt.datetime(2020, 12, 31))
+me_call.add_constant('currency', 'EUR')
+
+payoff_func = 'np.maximum(maturity_value - strike, 0)'
+
+eur_call = ValuationMCSEuropean('eur_call', underlying=gbm, mar_env=me_call, payoff_func=payoff_func)
+
+eur_call.present_value()  # present value of European call option
+eur_call.delta()          # numerical estimate of the delta of the option. Delta is positive for calls
+eur_call.vega()           # numerical estimate of the vega for the option. Vega is positive for both calls and puts
+
+def plot_option_stats(s_list, p_list, d_list, v_list):
+    '''plot option prices, deltas, and vegas for a set of different initial values of the underlying'''
+    plt.figure(figsize=(10, 7))
+    sub1 = plt.subplot(311)
+    plt.plot(s_list, p_list, 'ro', label='present value')
+    plt.plot(s_list, p_list, 'b')
+    plt.legend(loc=0)
+    plt.setp(sub1.get_xticklabels(), visible=False)
+    sub2 = plt.subplot(312)
+    plt.plot(s_list, d_list, 'go', label='Delta')
+    plt.plot(s_list, d_list, 'b')
+    plt.legend(loc=0)
+    plt.ylim(min(d_list) - 0.1, max(d_list) + 0.1)
+    plt.setp(sub2.get_xticklabels(), visible=False)
+    sub3 = plt.subplot(313)
+    plt.plot(s_list, v_list, 'yo', label='Vega')
+    plt.plot(s_list, v_list, 'b')
+    plt.xlabel('initial value of underlying')
+    plt.legend(loc=0)
+    plt.show()
+
+s_list = np.arange(34., 46.1, 2.)
+p_list, d_list, v_list = [], [], []
+
+for s in s_list:
+    eur_call.update(initial_value=s)
+    p_list.append(eur_call.present_value(fixed_seed=True))
+    d_list.append(eur_call.delta())
+    v_list.append(eur_call.vega())
+
+# present value, delta, and vega estimates for European call option
+plot_option_stats(s_list, p_list, d_list, v_list)
+
+# consider a payoff that is a mixture of a regular and Asian payoff
+payoff_func = 'np.maximum(0.33 * (maturity_value + max_value) - 40, 0)'
+
+eur_as_call = ValuationMCSEuropean('eur_as_call', underlying=gbm, mar_env=me_call, payoff_func=payoff_func)
+
+s_list = np.arange(34., 46.1, 2.)
+p_list, d_list, v_list = [], [], []
+
+for s in s_list:
+    eur_as_call.update(s)
+    p_list.append(eur_as_call.present_value(fixed_seed=True))
+    d_list.append(eur_as_call.delta())
+    v_list.append(eur_as_call.vega())
+
+plot_option_stats(s_list, p_list, d_list, v_list)
+#+end_src
+
+* American Exercise
+
+The valuation of options with American exercise or Bermudan exercise is much more involved than with European exercise.
+
+** Least Squares Monte Carlo
+
+The major problem with valuation of american options by Monte Carlo simulation is that MCS is a forward-moving algorithm, while the valuation of American options is generally accomplished by backward induction, estimating the continuation value of the American option starting at maturity and working back to the present.
+
+The major insight of the Longstaff-Schwartz model is to use an ordinary least-squares regression to estimate the continuation value based on the cross section of all available simulated values. The algorithm takes into account, per path:
+
+- the simulated value of the underlying (s)
+- the inner value of the option
+- the actual continuation value given the specific path
+
+In discrete time, the value of a Bermudan option (and in the limit of an American option) is given by the /optimal stopping problem:/
+
+$V_0 = \sup_{r \in \{0, t_1, ..., T\}} e^{-rT} E_0^Q (h_T(S_T))$
+
+for a finite set of points in time $0 < t_1 < ... < T$
+
+Here is the continuation value of the American option at date $0 \leq t_m < T$:
+
+$C_{t_m} = e^{-r(t_{m + 1} - t_m)} E_{t_m}^Q(V_{t_{m + 1}}(S_{t_{m + 1}}) | S_{t_m} = s)$
+
+It is the risk-neutral expectation at date $t_m$ under the martingale measure of the value of the American option $V_{t_{m + 1}}$ at the subsequent date
+
+** The Valuation Class
+
+The code that follows represents the class for the valuation of options and derivatives with American exercise.
+
+
+#+begin_src python
+class ValuationMCSAmerican(ValuationClass):
+    '''class to value American options with arbitrary payoff by single-factor Monte Carlo simulation'''
+    def generate_payoff(self, fixed_seed=False):
+        try:
+            strike = self.strike
+        except AttributeError:
+            pass
+        paths = self.underlying.get_instrument_values(fixed_seed=fixed_seed)
+        time_grid = self.underlying.time_grid
+        time_index_start = int(np.where(time_grid == self.pricing_date)[0])
+        time_index_end = int(np.where(time_grid == self.maturity)[0])
+        instrument_values = paths[time_index_start:time_index_end + 1]
+        payoff = eval(self.payoff_func)
+        return instrument_values, payoff, time_index_start, time_index_end
+
+    def present_value(self, accuracy=6, fixed_seed=False, bf=5, full=False):
+        instrument_values, inner_values, time_index_start, time_index_end = self.generate_payoff(fixed_seed=fixed_seed)
+        time_list = self.underlying.time_grid[time_index_start:time_index_end + 1]
+        discount_factors = self.discount_curve.get_discount_factors(time_list, dtobjects=True)
+        V = inner_values[-1]
+        for t in range(len(time_list) - 2, 0, -1):
+            # derive relevant discount factor for given time interval
+            df = discount_factors[t, 1] / discount_factors[t + 1, 1]
+            # regression step
+            rg = np.polyfit(instrument_values[t], V * df, bf)
+            # calculation of continuation values per path
+            C = np.polyval(rg, instrument_values[t])
+            # optimal decision step
+            # if condition (inner value > regression cont value)
+            # then take inner value; ow take actual value
+            V = np.where(inner_values[t] > C, inner_values[t], V * df)
+        df = discount_factors[0, 1] / discount_factors[1, 1]
+        result = df * np.sum(V) / len(V)
+        if full:
+            return round(result, accuracy), df * V
+        else:
+            return round(result, accuracy)
+
+## a use case
+me_gbm = MarketEnvironment('me_gbm', dt.datetime(2020, 1, 1))
+me_gbm.add_constant('initial_value', 36.)
+me_gbm.add_constant('volatility', 0.2)
+me_gbm.add_constant('final_date', dt.datetime(2020, 12, 31))
+me_gbm.add_constant('currency', 'EUR')
+me_gbm.add_constant('frequency', 'W')
+me_gbm.add_constant('paths', 50000)
+me_gbm.add_curve('discount_curve', ConstantShortRate('csr', 0.06))
+
+gbm = GeometricBrownianMotion('gbm', me_gbm)
+payoff_func = 'np.maximum(strike - instrument_values, 0)'
+
+me_am_put = MarketEnvironment('me_am_put', dt.datetime(2020, 1, 1))
+me_am_put.add_constant('maturity', dt.datetime(2020, 12, 31))
+me_am_put.add_constant('strike', 40.)
+me_am_put.add_constant('currency', 'EUR')
+
+am_put = ValuationMCSAmerican('am_put', underlying=gbm, mar_env=me_am_put, payoff_func=payoff_func)
+
+am_put.present_value(fixed_seed=True, bf=5)
+#+end_src
