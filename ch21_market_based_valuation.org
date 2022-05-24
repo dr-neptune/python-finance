@@ -128,8 +128,312 @@ calculate_model_values((0.1, 0.1, -0.4, 0.0))
 Calibration of an option pricing model is, in general, a convex optimization problem.
 The most widely used function for this is the /mean-squared error/ for the model option values given the market quotes of the options.
 
+Assume that are N relevant options, and also model and market quotes. The problem of calibrating an option pricing model to the market quotes based on the MSE is given by:
+
+$\min_p \frac{1}{N} \Sigma_{n = 1}^N (C_n^* - C_n^{mod}(p))^2$
+
+
+where $C_n^*$ and $C_n^{mod}$ are the market price and the model price of the $n$th option, respectively.
+$p$ is the parameter set provided as input to the option pricing model.
 
 
 #+begin_src python
+i = 0
+def mean_squared_error(p0):
+    '''returns the mean-squared error given the model and market values'''
+    global i
+    # estimate the set of model values
+    model_values = np.array(list(calculate_model_values(p0).values()))
+    # picks out the market quotes
+    market_values = option_selection['CF_CLOSE'].values
+    # calculate element-wise the different between the two
+    option_diffs = model_values - market_values
+    # calculate the mean squared error value
+    MSE = np.sum(option_diffs ** 2) / len(option_diffs)
+    if i % 75 == 0:
+        if i == 0:
+            print('%4s %6s %6s %6s %6s --> %6s' % ('i', 'vola', 'lambda', 'mu', 'delta', 'MSE'))
+        print('%4d %6.3f %6.3f %6.3f %6.3f --> %6.3f' % (i, p0[0], p0[1], p0[2], p0[3], MSE))
+    i += 1
+    return MSE
 
+mean_squared_error((0.1, 0.1, -0.4, 0.0))
+#+end_src
+
+First we perform global minimization based on ranges for the four model-specific parameter values. The result is brute-force minimization:
+
+#+begin_src python
+import scipy.optimize as spo
+
+i = 0
+opt_global = spo.brute(mean_squared_error,
+                       ((0.10, 0.201, 0.025),
+                        (0.10, 0.80, 0.10),
+                        (-0.40, 0.01, 0.10),
+                        (0.00, 0.121, 0.02)),
+                        finish=None)
+
+mean_squared_error(opt_global)
+
+# the opt_global values are intermediate results only
+# they are used as starting values for the local minimization
+
+i = 0
+opt_local = spo.fmin(mean_squared_error,
+                     opt_global,
+                     xtol=0.00001,
+                     ftol=0.00001,
+                     maxiter=200,
+                     maxfun=550)
+
+i = 0
+mean_squared_error(opt_local)
+
+calculate_model_values(opt_local)
+
+# compare the model values for the optimal parameters with the market quotes
+option_selection['MODEL'] = np.array(list(calculate_model_values(opt_local).values()))
+option_selection['ERRORS_EUR'] = (option_selection['MODEL'] - option_selection['CF_CLOSE'])
+option_selection['ERRORS_%'] = (option_selection['ERRORS_EUR'] / option_selection['CF_CLOSE']) * 100
+option_selection[['MODEL', 'CF_CLOSE', 'ERRORS_EUR', 'ERRORS_%']]
+
+round(option_selection['ERRORS_EUR'].mean(), 3)    # average pricing error in EUR
+round(option_selection['ERRORS_%'].mean(), 3)      # average pricing error in percent
+
+# model values and market qutoes after calibration
+fix, (ax1, ax2, ax3) = plt.subplots(3, sharex=True)
+strikes = option_selection['STRIKE_PRC'].values
+ax1.plot(strikes, option_selection['CF_CLOSE'], label='market quotes')
+ax1.plot(strikes, option_selection['MODEL'], 'ro', label='model values')
+ax1.set_ylabel('option values')
+ax1.legend(loc=0)
+wi = 15
+ax2.bar(strikes - wi / 2., option_selection['ERRORS_EUR'], width=wi)
+ax2.set_ylabel('errors [EUR]')
+ax3.bar(strikes - wi / 2., option_selection['ERRORS_%'], width=wi)
+ax3.set_ylabel('errors [%]')
+ax3.set_xlabel('strikes')
+plt.show()
+#+end_src
+
+* Portfolio Valuation
+
+Being equipped with a calibrated model reflecting realities in the financial markets as represented by market quotes of liquidly traded options enables one to model and value non-traded options and derivatives. The idea is that calibrations "infuses" the correct risk-neutral martingale measure into the model via optimal parameters. Based on this measure, the machinery of the Fundamental Theorem of Asset Pricing can then be applied to contingent claims beyond those used for the calibration.
+
+This section considers a portfolio of American put options on the DAX30 index. There are no such options available that are liquidly traded on exchanges.
+For simplicity, it is assumed that the American put options have the same maturity as the European call options used for the calibration. Similarly, the same strikes are assumed.
+
+** Modeling Option Positions
+
+#+begin_src python
+# build a valuation environment
+# models available for risk factor modeling
+models = {'gbm': GeometricBrownianMotion,
+          'jd': JumpDiffusion,
+          'srd': SquareRootDiffusion}
+
+# allowed exercise types
+otypes = {'European': ValuationMCSEuropean,
+          'American': ValuationMCSAmerican}
+
+# models = {'gbm': geometric_brownian_motion,
+#           'jd': jump_diffusion,
+#           'srd': square_root_diffusion}
+
+# # allowed exercise types
+# otypes = {'European': valuation_mcs_european,
+#           'American': valuation_mcs_american}
+
+
+class derivatives_portfolio(object):
+    ''' Class for modeling and valuing portfolios of derivatives positions.
+    Attributes
+    ==========
+    name: str
+        name of the object
+    positions: dict
+        dictionary of positions (instances of derivatives_position class)
+    val_env: market_environment
+        market environment for the valuation
+    assets: dict
+        dictionary of market environments for the assets
+    correlations: list
+        correlations between assets
+    fixed_seed: bool
+        flag for fixed random number generator seed
+    Methods
+    =======
+    get_positions:
+        prints information about the single portfolio positions
+    get_statistics:
+        returns a pandas DataFrame object with portfolio statistics
+    '''
+
+    def __init__(self, name, positions, val_env, assets,
+                 correlations=None, fixed_seed=False):
+        self.name = name
+        self.positions = positions
+        self.val_env = val_env
+        self.assets = assets
+        self.underlyings = set()
+        self.correlations = correlations
+        self.time_grid = None
+        self.underlying_objects = {}
+        self.valuation_objects = {}
+        self.fixed_seed = fixed_seed
+        self.special_dates = []
+        for pos in self.positions:
+            # determine earliest starting_date
+            self.val_env.constants['starting_date'] = \
+                min(self.val_env.constants['starting_date'],
+                    positions[pos].mar_env.pricing_date)
+            # determine latest date of relevance
+            self.val_env.constants['final_date'] = \
+                max(self.val_env.constants['final_date'],
+                    positions[pos].mar_env.constants['maturity'])
+            # collect all underlyings and
+            # add to set (avoids redundancy)
+            self.underlyings.add(positions[pos].underlying)
+
+        # generate general time grid
+        start = self.val_env.constants['starting_date']
+        end = self.val_env.constants['final_date']
+        time_grid = pd.date_range(start=start, end=end,
+                                  freq=self.val_env.constants['frequency']
+                                  ).to_pydatetime()
+        time_grid = list(time_grid)
+        for pos in self.positions:
+            maturity_date = positions[pos].mar_env.constants['maturity']
+            if maturity_date not in time_grid:
+                time_grid.insert(0, maturity_date)
+                self.special_dates.append(maturity_date)
+        if start not in time_grid:
+            time_grid.insert(0, start)
+        if end not in time_grid:
+            time_grid.append(end)
+        # delete duplicate entries
+        time_grid = list(set(time_grid))
+        # sort dates in time_grid
+        time_grid.sort()
+        self.time_grid = np.array(time_grid)
+        self.val_env.add_list('time_grid', self.time_grid)
+
+        if correlations is not None:
+            # take care of correlations
+            ul_list = sorted(self.underlyings)
+            correlation_matrix = np.zeros((len(ul_list), len(ul_list)))
+            np.fill_diagonal(correlation_matrix, 1.0)
+            correlation_matrix = pd.DataFrame(correlation_matrix,
+                                              index=ul_list, columns=ul_list)
+            for i, j, corr in correlations:
+                corr = min(corr, 0.999999999999)
+                # fill correlation matrix
+                correlation_matrix.loc[i, j] = corr
+                correlation_matrix.loc[j, i] = corr
+            # determine Cholesky matrix
+            cholesky_matrix = np.linalg.cholesky(np.array(correlation_matrix))
+
+            # dictionary with index positions for the
+            # slice of the random number array to be used by
+            # respective underlying
+            rn_set = {asset: ul_list.index(asset)
+                      for asset in self.underlyings}
+
+            # random numbers array, to be used by
+            # all underlyings (if correlations exist)
+            random_numbers = sn_random_numbers((len(rn_set),
+                                                len(self.time_grid),
+                                                self.val_env.constants['paths']),
+                                               fixed_seed=self.fixed_seed)
+
+            # add all to valuation environment that is
+            # to be shared with every underlying
+            self.val_env.add_list('cholesky_matrix', cholesky_matrix)
+            self.val_env.add_list('random_numbers', random_numbers)
+            self.val_env.add_list('rn_set', rn_set)
+
+        for asset in self.underlyings:
+            # select market environment of asset
+            mar_env = self.assets[asset]
+            # add valuation environment to market environment
+            mar_env.add_environment(val_env)
+            # select right simulation class
+            model = models[mar_env.constants['model']]
+            # instantiate simulation object
+            if correlations is not None:
+                self.underlying_objects[asset] = model(asset, mar_env,
+                                                       corr=True)
+            else:
+                self.underlying_objects[asset] = model(asset, mar_env,
+                                                       corr=False)
+
+        for pos in positions:
+            # select right valuation class (European, American)
+            val_class = otypes[positions[pos].otype]
+            # pick market environment and add valuation environment
+            mar_env = positions[pos].mar_env
+            mar_env.add_environment(self.val_env)
+            # instantiate valuation class
+            self.valuation_objects[pos] = \
+                val_class(name=positions[pos].name,
+                          mar_env=mar_env,
+                          underlying=self.underlying_objects[
+                    positions[pos].underlying],
+                payoff_func=positions[pos].payoff_func)
+
+    def get_positions(self):
+        ''' Convenience method to get information about
+        all derivatives positions in a portfolio. '''
+        for pos in self.positions:
+            bar = '\n' + 50 * '-'
+            print(bar)
+            self.positions[pos].get_info()
+            print(bar)
+
+    def get_statistics(self, fixed_seed=False):
+        ''' Provides portfolio statistics. '''
+        res_list = []
+        # iterate over all positions in portfolio
+        for pos, value in self.valuation_objects.items():
+            p = self.positions[pos]
+            pv = value.present_value(fixed_seed=fixed_seed)
+            res_list.append([
+                p.name,
+                p.quantity,
+                # calculate all present values for the single instruments
+                pv,
+                value.currency,
+                # single instrument value times quantity
+                pv * p.quantity,
+                # calculate Delta of position
+                value.delta() * p.quantity,
+                # calculate Vega of position
+                value.vega() * p.quantity,
+            ])
+        # generate a pandas DataFrame object with all results
+        res_df = pd.DataFrame(res_list,
+                              columns=['name', 'quant.', 'value', 'curr.',
+                                       'pos_value', 'pos_delta', 'pos_vega'])
+        return res_df
+
+val_env = MarketEnvironment('val_env', pricing_date)
+val_env.add_constant('starting_date', pricing_date)
+val_env.add_constant('final_date', pricing_date)
+val_env.add_curve('discount_curve', csr)
+val_env.add_constant('frequency', 'B')
+val_env.add_constant('paths', 25000)
+
+underlyings = {'dax_model': me_dax}
+
+# name, positions, val_env, assets,
+portfolio = derivatives_portfolio(name='portfolio',
+                                  positions=option_positions,
+                                  val_env=val_env,
+                                  assets=underlyings)
+
+results = portfolio.get_statistics(fixed_seed=True)
+
+results.round(1)
+
+results[['pos_value', 'pos_delta', 'pos_vega']].sum().round(1)
 #+end_src
