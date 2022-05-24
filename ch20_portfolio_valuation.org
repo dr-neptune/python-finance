@@ -252,3 +252,5 @@ class DerivativesPortfolio:
         res_df = pd.DataFrame(res_list, columns=['name', 'quant', 'value', 'curr', 'pos_value', 'pos_delta', 'pos_vega'])
         return res_df
 #+end_src
+
+This is some extra wording

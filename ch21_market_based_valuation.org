@@ -1,0 +1,19 @@
+#+TITLE: Chapter 21: Market-Based Valuation
+
+A major task in derivatives analytics is the market-based valuation of options and derivatives that are not liquidly traded. To this end, one generally calibrates a pricing model to market quotes of liquidly traded options and uses the calibrated model for the pricing of the non-traded options.
+
+This chapter is divided into sections that implement the following major tasks:
+
+Options Data
+  We need the DAX 30 stock index itself and the European options on the index
+
+Model Calibration
+  To value the non-traded options in a market-consistent fashion, one generally first
+  calibrates the chosen model to quoted option prices in such a way that the model based on the
+  optimal parameters replicates the market prices as well as possible
+
+Portfolio Valuation
+  The final task is to model and value the non-traded options; important risk measures are also
+  estimated on a position and portfolio level
+
+* Options Data
