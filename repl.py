@@ -996,3 +996,101 @@ pv1 = 5 * portfolio.valuation_objects['eur_call_pos'].present_value(full=True)[1
 pv2 = 3 * portfolio.valuation_objects['am_put_pos'].present_value(full=True)[1]
 
 (pv1 + pv2).std()
+
+# chapter 21: Market-Based Valuation
+dax = pd.read_csv('data/tr_eikon_option_data.csv')
+
+for col in ['CF_DATE', 'EXPIR_DATE']:
+    dax[col] = dax[col].apply(lambda date: pd.Timestamp(date))
+
+dax.info()
+dax.set_index('Instrument').head(7)
+
+# assign the relevant index level to the initial_value var
+initial_value = dax.iloc[0]['CF_CLOSE']
+
+# seperate the options data for calls and puts
+calls = dax[dax['PUTCALLIND'] == 'CALL'].copy()
+puts = dax[dax['PUTCALLIND'] == 'PUT '].copy()
+
+# market quotes and implied volatilities for European call options on the DAX 30
+calls.set_index('STRIKE_PRC')[['CF_CLOSE', 'IMP_VOLT']].plot(secondary_y='IMP_VOLT',
+                                                             style=['bo', 'rv'])
+plt.show()
+
+
+# market quotes and implied volatilities for European put options on the DAX 30
+ax = puts.set_index('STRIKE_PRC')[['CF_CLOSE', 'IMP_VOLT']].plot(secondary_y='IMP_VOLT',
+                                                             style=['bo', 'rv'])
+ax.get_legend().set_bbox_to_anchor((0.25, 0.5))
+plt.show()
+
+# Model Calibration
+# set limit value for the derivation of the strike price from the current index level
+# (moneyness condition)
+limit = 500
+
+# selects, based on the limit value, the European call options to be included for the calibration
+option_selection = calls[abs(calls['STRIKE_PRC'] - initial_value) < limit].copy()
+
+option_selection.info()
+option_selection.set_index('Instrument').tail()
+
+# European call options on the DAX30 used for model calibration
+option_selection.set_index('STRIKE_PRC')[['CF_CLOSE', 'IMP_VOLT']].plot(secondary_y='IMP_VOLT',
+                                                                        style=['bo', 'rv'])
+plt.show()
+
+# Optional Modeling
+
+# create market environment
+pricing_date = option_selection['CF_DATE'].max()
+me_dax = MarketEnvironment('DAX30', pricing_date)
+maturity = pd.Timestamp(calls.iloc[0]['EXPIR_DATE'])
+me_dax.add_constant('initial_value', initial_value)
+me_dax.add_constant('final_date', maturity)
+me_dax.add_constant('currency', 'EUR')
+me_dax.add_constant('frequency', 'B')
+me_dax.add_constant('paths', 10000)
+me_dax.add_curve('discount_curve', ConstantShortRate('csr', 0.01))
+
+# add constants for the jump diffusion class
+me_dax.add_constant('volatility', 0.2)
+me_dax.add_constant('lambda', 0.8)
+me_dax.add_constant('mu', -0.2)
+me_dax.add_constant('delta', 0.1)
+
+dax_model = JumpDiffusion('dax_model', me_dax)
+
+# European call option
+
+# set strike price and maturity
+me_dax.add_constant('strike', initial_value)
+me_dax.add_constant('maturity', maturity)
+
+# payoff func for a European call option
+payoff_func = 'np.maximum(maturity_value - strike, 0)'
+
+dax_eur_call = ValuationMCSEuropean('dax_eur_call', dax_model, me_dax, payoff_func)
+dax_eur_call.present_value()
+
+# valuation objects can be defined for all relevant European call options on the DAX30 index.
+options_models = {}
+for option in option_selection.index:
+    strike = option_selection['STRIKE_PRC'].loc[option]
+    me_dax.add_constant('strike', strike)
+    options_models[strike] = ValuationMCSEuropean(f'eur_call_{strike}',
+                                                  dax_model,
+                                                  me_dax,
+                                                  payoff_func)
+
+def calculate_model_values(p0):
+    '''return all relevant option values'''
+    volatility, lamb, mu, delta = p0
+    dax_model.update(volatility=volatility,
+                     lamb=lamb,
+                     mu=mu,
+                     delta=delta)
+    return {strike: model.present_value(fixed_seed=True) for strike, model in options_models.items()}
+
+calculate_model_values((0.1, 0.1, -0.4, 0.0))
